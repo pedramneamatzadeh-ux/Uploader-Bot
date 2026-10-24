@@ -148,7 +148,7 @@ async def _dispatch_management(
         return MANAGE_LIST
 
     if data == "mg_sort":
-        current = manage.get("sort", "alpha")
+        current = manage.get("sort", "new")  # B3
         next_idx = (
             SORT_MODES.index(current) + 1
             if current in SORT_MODES
@@ -219,6 +219,12 @@ async def _dispatch_management(
         manage.pop("episode", None)
         manage.pop("l4", None)
 
+        if group.get("session_id"):
+            # B1: عضو لینک‌محور (یک لینک با alias جدا) ⇒ مستقیم جزئیات
+            context.user_data["manage"] = manage
+            await show_link_detail(chat_id, context, group["session_id"])
+            return MANAGE_DETAIL
+
         if manage["is_cinema"]:
             # R5: در سینمایی سطح «قسمت» ادغام شده ⇒ مستقیم کیفیت‌ها
             manage["l4"] = db.get_group_links(
@@ -240,6 +246,7 @@ async def _dispatch_management(
         )
         entries.sort(key=_episode_sort_key)
         manage["l3"] = entries
+        manage["ep_page"] = 0  # B10: فصل تازه ⇒ صفحهٔ اول
         context.user_data["manage"] = manage
         await show_episode_list(chat_id, context)
         return MANAGE_EPISODES
@@ -282,6 +289,16 @@ async def _dispatch_management(
         session_id = rows[idx]["session_id"]
         await show_link_detail(chat_id, context, session_id)
         return MANAGE_DETAIL
+
+    # --- B10: صفحه‌بندی لیست قسمت‌ها ---
+    if data.startswith("mg_ep_page:"):
+        try:
+            manage["ep_page"] = max(0, int(data.split(":", 1)[1]))
+        except ValueError:
+            manage["ep_page"] = 0
+        context.user_data["manage"] = manage
+        await show_episode_list(chat_id, context)
+        return MANAGE_EPISODES
 
     # --- بازگشت یک سطح بالاتر ---
     if data == "mg_back":
@@ -522,24 +539,26 @@ async def _dispatch_management(
         return await _refresh_current(chat_id, context, manage)
 
     if data.startswith("alias_reset_detail:"):
+        # B1: ریست فقط alias خودِ لینک را پاک می‌کند ⇒ بازگشت به ارثی
+        # فصل/نام/واقعی (دکمه‌های سطح فصل در صفحه قسمت‌ها/کیفیت‌ها هستند).
         session_id = data.split(":", 1)[1]
         link = db.get_upload_by_id(session_id)
         if not link:
             await query.answer("❌ لینک پیدا نشد.", show_alert=True)
             return MANAGE_DETAIL
-        name = link["anime_name"]
-        season = link.get("season_num") or ""
-        part = link.get("part_num") or ""
-        db.clear_display_for(name, season, part)
-        db.clear_display_for(name, "", "")
+        had_own = db.clear_link_display(session_id)
         for key in ("edit_session", "edit_field", "waiting_for_input"):
             context.user_data.pop(key, None)
-        manage["name"] = name
-        manage["season"] = season
-        manage["part"] = part
-        _recalc_manage_group(manage, name, season, part)
-        context.user_data["manage"] = manage
-        await query.answer("↩️ نام ظاهری به نام واقعی برگشت.")
+        effective = db.get_display_for(
+            link["anime_name"],
+            link.get("season_num"),
+            link.get("part_num"),
+        )
+        if had_own:
+            toast = f"↩️ alias خود لینک حذف شد — ارثی فصل: {effective}"
+        else:
+            toast = f"↩️ این لینک alias جدا نداشت — ارثی فصل: {effective}"
+        await query.answer(toast)
         await show_link_detail(chat_id, context, session_id)
         return MANAGE_DETAIL
 
@@ -549,27 +568,34 @@ async def _dispatch_management(
         context.user_data["edit_field"] = action
 
         if action == "alias":
-            # R12: نام ظاهری در سطح (نام واقعی، فصل، پارت)
+            # B1: نام ظاهری در سطح *لینک* — فقط همین لینک تغییر می‌کند
             link = db.get_upload_by_id(session_id)
             if not link:
                 await query.answer("❌ لینک پیدا نشد.", show_alert=True)
                 for key in ("edit_session", "edit_field"):
                     context.user_data.pop(key, None)
                 return MANAGE_DETAIL
-            current = db.get_display_for(
+            own = db.get_link_display(session_id)
+            inherited = db.get_display_for(
                 link["anime_name"],
                 link.get("season_num"),
                 link.get("part_num"),
             )
+            current_line = (
+                f"🎭 نام ظاهری فعلی: {own} (ست‌شده روی همین لینک)"
+                if own
+                else f"🎭 نام ظاهری فعلی: {inherited} (ارثی از فصل)"
+            )
             await query.edit_message_text(
-                "🎭 تغییر نام ظاهری — فقط برای همین فصل/پارت\n\n"
+                "🎭 تغییر نام ظاهری — فقط برای همین لینک\n\n"
                 f"📛 نام واقعی: {link['anime_name']}\n"
-                f"🎭 نام ظاهری فعلی: {current}\n\n"
+                f"{current_line}\n\n"
                 "نام ظاهری جدید (فقط حروف انگلیسی) را وارد کن:\n"
-                "• اگر با نام ظاهری انیمه دیگری یکی شود، در لیست اول "
-                "پیش هم قرار می‌گیرند.\n"
-                "• اگر متفاوت باشد، این فصل/پارت یک انیمه جدا حساب "
-                "می‌شود.\n\n"
+                "• فقط همین لینک تغییر می‌کند؛ بقیه لینک‌های فصل دست "
+                "نمی‌خورند.\n"
+                "• اگر با نام ظاهری گروه دیگری یکی شود، در لیست اول "
+                "پیش آن‌ها قرار می‌گیرد.\n"
+                "• اگر متفاوت باشد، این لینک یک انیمه جدا حساب می‌شود.\n\n"
                 "برای لغو /cancel را تایپ کن.",
                 reply_markup=_alias_reset_keyboard(
                     f"alias_reset_detail:{session_id}",

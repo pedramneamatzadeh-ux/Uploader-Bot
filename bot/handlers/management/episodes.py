@@ -48,6 +48,9 @@ from .common import _append_name_buttons, _episode_sort_key, _group_label, _mana
 
 logger = logging.getLogger(__name__)
 
+# B10: تعداد قسمت‌ها در هر صفحه (انیمه‌های پرقسمت در یک پیام جا نمی‌شوند)
+EPISODES_PAGE_SIZE = 20
+
 
 # ---------------------------------------------------------------------------
 # سطح ۳: قسمت‌ها (هر آپلود جدا = یک ورودی؛ بازه‌ها تک‌دکمه)
@@ -79,9 +82,16 @@ async def show_episode_list(
     if not entries:
         text = title + "قسمتی یافت نشد. 😕"
     else:
+        # B10: صفحه‌بندی قسمت‌ها (اندیس m3 سراسری می‌ماند)
+        pages = total_pages(len(entries), EPISODES_PAGE_SIZE)
+        page = min(max(0, manage.get("ep_page", 0)), pages - 1)
+        manage["ep_page"] = page
+        start = page * EPISODES_PAGE_SIZE
+        page_entries = entries[start:start + EPISODES_PAGE_SIZE]
+
         lines = []
         episode_buttons = []
-        for idx, entry in enumerate(entries):
+        for idx, entry in enumerate(page_entries, start=start):
             episode = entry.get("episode_range") or ""
             display = episode or "نامشخص"
             lines.append(
@@ -99,6 +109,19 @@ async def show_episode_list(
         # دکمه‌های قسمت: دو تا در هر ردیف
         for row_start in range(0, len(episode_buttons), 2):
             keyboard.append(episode_buttons[row_start:row_start + 2])
+
+        # B10: ردیف صفحه‌بندی — بالای دکمه‌های تغییر اسم (درخواست کاربر)
+        if pages > 1:
+            nav = build_pagination_row(
+                page,
+                pages,
+                f"mg_ep_page:{page - 1}",
+                f"mg_ep_page:{page}",
+                f"mg_ep_page:{page + 1}",
+            )
+            if nav:
+                keyboard.append(nav)
+            lines.append(f"\n📄 صفحه {page + 1} از {pages}")
 
         text = title + "\n".join(lines)
 

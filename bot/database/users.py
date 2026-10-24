@@ -163,6 +163,7 @@ class UsersMixin:
                 """
                 SELECT
                     downloads.user_id,
+                    downloads.session_id,
                     uploads.anime_name,
                     COALESCE(uploads.anime_type, '') AS anime_type,
                     COALESCE(uploads.season_num, '') AS season_num,

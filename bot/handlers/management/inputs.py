@@ -62,7 +62,8 @@ async def start_management(
         "page": 0,
         "mode": "list",
         "search_term": None,
-        "sort": "alpha",
+        # B3: پیش‌فرض مرتب‌سازی لیست اول = جدیدترین (تصمیم کاربر)
+        "sort": "new",
         "level": 1,
     }
     await show_link_list(update.message.chat_id, context)
@@ -240,8 +241,17 @@ async def handle_edit_input(
             )
             return MANAGE_EDIT
 
-        ref = context.user_data["add_quality_ref"]
-        quality = context.user_data["aq_quality"]
+        # P14: اگر دادهٔ مرحلهٔ قبل گم شده بود (جلوگیری از KeyError)
+        ref = context.user_data.get("add_quality_ref")
+        quality = context.user_data.get("aq_quality")
+        if not ref or not quality:
+            context.user_data.pop("aq_waiting", None)
+            await update.message.reply_text(
+                "⚠️ اطلاعات مرحلهٔ قبل در دسترس نیست. "
+                "لطفاً دوباره از منوی مدیریت شروع کن."
+            )
+            await go_to_main_menu(context, update.message.chat_id)
+            return ConversationHandler.END
         new_sid = str(uuid.uuid4())
 
         entry = {
@@ -305,7 +315,8 @@ async def handle_edit_input(
         return MANAGE_LIST
 
     if field == "alias":
-        # R12: ذخیره نام ظاهری برای همین (نام واقعی، فصل، پارت)
+        # B1: نام ظاهری سطح *لینک* — فقط همین لینک تغییر می‌کند؛
+        # بقیه لینک‌های فصل به alias فصل/نام/واقعی خودشان می‌مانند.
         link = db.get_upload_by_id(session_id)
         if not link:
             await update.message.reply_text("❌ لینک پیدا نشد.")
@@ -318,19 +329,40 @@ async def handle_edit_input(
             )
             return MANAGE_EDIT
 
-        db.set_display_for(
+        inherited = db.get_display_for(
             link["anime_name"],
             link.get("season_num"),
             link.get("part_num"),
-            text,
         )
+        own = db.get_link_display(session_id)
+
+        if text == inherited and not own:
+            await update.message.reply_text(
+                "❌ این همان نام ظاهری ارثی فصل است — برای جداسازی این "
+                "لینک نام متفاوتی وارد کن (یا /cancel)."
+            )
+            return MANAGE_EDIT
+
+        if text == inherited and own:
+            # وارد کردن نام ارثی وقتی alias جدا دارد = بازپیوستن به فصل
+            db.clear_link_display(session_id)
+            result = (
+                "🔗 لینک دوباره با گروه فصل یکی شد:\n"
+                f"🎭 «{inherited}»"
+            )
+        else:
+            db.set_link_display(session_id, text)
+            result = (
+                "✅ نام ظاهری همین لینک تغییر یافت:\n"
+                f"🎭 «{text}»\n\n"
+                "✂️ در لیست اول این لینک برچسب خودش را دارد؛ اگر گروه "
+                "هم‌نامی باشد پیش آن‌ها می‌رود، وگرنه یک انیمه جداست.\n"
+                "🔗 بقیه لینک‌های فصل و نام واقعی دست نخوردند."
+            )
+
         for key in ("edit_session", "edit_field", "waiting_for_input"):
             context.user_data.pop(key, None)
-        await update.message.reply_text(
-            "✅ نام ظاهری همین فصل/پارت تغییر یافت:\n"
-            f"🎭 «{text}»\n\n"
-            "🔗 نام واقعی و لینک‌ها دست نخوردند."
-        )
+        await update.message.reply_text(result)
         await show_link_detail(chat_id, context, session_id)
         return MANAGE_DETAIL
 

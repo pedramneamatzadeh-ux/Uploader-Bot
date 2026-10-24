@@ -1,6 +1,7 @@
+import html
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -8,7 +9,7 @@ from ..config import config
 from ..constants import MANAGE_STATS, Msg
 from ..database import db
 from ..decorators import admin_only
-from ..keyboards import build_pagination_row
+from ..keyboards import build_pagination_row, ib
 from ..utils import (
     build_download_link,
     fmt_tehran,
@@ -26,6 +27,22 @@ logger = logging.getLogger(__name__)
 TOP_PAGE_SIZE = 10
 
 
+def _display_for_row(row) -> str:
+    """B1: نام ظاهری مؤثر — alias سطح لینک اولویت دارد (ردیف‌هایی که
+    session_id دارند: آخرین دانلود کاربر، گزارش‌ها)، وگرنه زنجیرهٔ
+    فصل/پارت → سطح-نام → نام واقعی."""
+    sid = row.get("session_id")
+    if sid:
+        effective = db.get_effective_display_for_link(sid)
+        if effective:
+            return effective
+    return db.get_display_for(
+        row["anime_name"],
+        row.get("season_num"),
+        row.get("part_num"),
+    )
+
+
 @admin_only
 async def show_stats(
     update: Update,
@@ -40,17 +57,18 @@ async def show_stats_menu(
     context: ContextTypes.DEFAULT_TYPE,
     message_id: int = None,
 ) -> None:
-    text = "📊 **بخش آمار و گزارشات**\n\nگزینه مورد نظر را انتخاب کنید:"
+    text = "📊 <b>بخش آمار و گزارشات</b>\n\nگزینه مورد نظر را انتخاب کنید:"
     keyboard = [
-        [InlineKeyboardButton("👥 کاربران ربات", callback_data="stats_users")],
-        [InlineKeyboardButton("🏆 انیمه‌های پرطرفدار",
-                              callback_data="stats_top_anime")],
-        [InlineKeyboardButton("📅 آمار دوره‌ای",
-                              callback_data="stats_periods")],
-        [InlineKeyboardButton("🔴 گزارش‌های خرابی",
-                              callback_data="stats_reports")],
-        [InlineKeyboardButton("🏠 بازگشت به منوی اصلی",
-                              callback_data="stats_back_main")],
+        # B6: منوی دو ستونی
+        [
+            ib("👥 کاربران", callback_data="stats_users"),
+            ib("🏆 پرطرفدار", callback_data="stats_top_anime"),
+        ],
+        [
+            ib("📅 دوره‌ای", callback_data="stats_periods"),
+            ib("🔴 گزارش‌ها", callback_data="stats_reports"),
+        ],
+        [ib("🏠 بازگشت به منوی اصلی", callback_data="stats_back_main")],
     ]
     await safe_edit_or_send(
         context,
@@ -58,7 +76,7 @@ async def show_stats_menu(
         text,
         InlineKeyboardMarkup(keyboard),
         message_id,
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -78,7 +96,7 @@ async def show_users_stats(
     download_info = db.get_user_download_info()
 
     lines = [
-        "👥 **لیست کاربران ربات**\n",
+        "👥 <b>لیست کاربران ربات</b>\n",
         f"📈 تعداد کل کاربران: {total}\n",
         "─" * 25 + "\n",
     ]
@@ -88,8 +106,8 @@ async def show_users_stats(
         if user["last_name"]:
             name += f" {user['last_name']}"
         username = f"@{user['username']}" if user["username"] else "بدون یوزرنیم"
-        lines.append(f"{idx}. {name}")
-        lines.append(f"   🆔 {user['user_id']} | {username}")
+        lines.append(f"{idx}. {html.escape(name)}")
+        lines.append(f"   🆔 {user['user_id']} | {html.escape(username)}")
         lines.append(f"   📅 آخرین فعالیت: {fmt_tehran(user['last_activity'])}")
         info = download_info.get(user["user_id"]) or {}
         last = info.get("last")
@@ -99,14 +117,11 @@ async def show_users_stats(
                 last.get("season_num"),
                 last.get("part_num"),
                 last.get("anime_type"),
-                display=db.get_display_for(
-                    last["anime_name"],
-                    last.get("season_num"),
-                    last.get("part_num"),
-                ),
+                display=_display_for_row(last),
             )
             lines.append(
-                f"   🎬 آخرین دانلود: {title} ({last['quality']})"
+                f"   🎬 آخرین دانلود: {html.escape(title)}"
+                f" ({html.escape(last['quality'])})"
             )
             lines.append(
                 f"      🕒 {fmt_tehran(last['downloaded_at'])}"
@@ -128,8 +143,7 @@ async def show_users_stats(
     )
     if nav:
         keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton(
-        "🔙 بازگشت", callback_data="stats_back")])
+    keyboard.append([ib("🔙 بازگشت", callback_data="stats_back")])
 
     await safe_edit_or_send(
         context,
@@ -137,7 +151,7 @@ async def show_users_stats(
         "\n".join(lines),
         InlineKeyboardMarkup(keyboard),
         message_id,
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -154,7 +168,7 @@ async def show_top_anime_stats(
     top = db.get_top_anime_grouped(TOP_PAGE_SIZE, page * TOP_PAGE_SIZE)
 
     lines = [
-        "🏆 **انیمه‌های پرطرفدار**\n",
+        "🏆 <b>انیمه‌های پرطرفدار</b>\n",
         f"📥 تعداد کل دانلودها: {total}",
         "👤 هر کاربر برای هر فصل/پارت فقط یک‌بار شمرده می‌شود.\n",
         "─" * 25 + "\n",
@@ -178,7 +192,7 @@ async def show_top_anime_stats(
                     anime.get("part_num"),
                 ),
             )
-            lines.append(f"{medal} **{title}**")
+            lines.append(f"{medal} <b>{html.escape(title)}</b>")
             lines.append(
                 f"   👥 {anime['users_count']} نفر"
                 f" | 📥 {anime['total_count']} بار\n"
@@ -197,8 +211,7 @@ async def show_top_anime_stats(
     )
     if nav:
         keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton(
-        "🔙 بازگشت", callback_data="stats_back")])
+    keyboard.append([ib("🔙 بازگشت", callback_data="stats_back")])
 
     await safe_edit_or_send(
         context,
@@ -206,7 +219,7 @@ async def show_top_anime_stats(
         "\n".join(lines),
         InlineKeyboardMarkup(keyboard),
         message_id,
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -217,17 +230,14 @@ async def show_periods_menu(
 ) -> None:
     """R8d — صفحهٔ انتخاب دورهٔ آمار (تقویم شمسی، به وقت تهران)."""
     text = (
-        "📅 **آمار دوره‌ای**\n\n"
+        "📅 <b>آمار دوره‌ای</b>\n\n"
         "دوره را انتخاب کنید (مرزها بر مبنای تقویم شمسی و وقت تهران):"
     )
     keyboard = [
-        [InlineKeyboardButton("📅 هفتگی (از شنبهٔ این هفته)",
-                              callback_data="stats_period:w")],
-        [InlineKeyboardButton("📆 ماهانه (از ۱م ماه جاری)",
-                              callback_data="stats_period:m")],
-        [InlineKeyboardButton("🗓 سالانه (از ۱ فروردین)",
-                              callback_data="stats_period:y")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="stats_back")],
+        [ib("📅 هفتگی (از شنبهٔ این هفته)", callback_data="stats_period:w")],
+        [ib("📆 ماهانه (از ۱م ماه جاری)", callback_data="stats_period:m")],
+        [ib("🗓 سالانه (از ۱ فروردین)", callback_data="stats_period:y")],
+        [ib("🔙 بازگشت", callback_data="stats_back")],
     ]
     await safe_edit_or_send(
         context,
@@ -235,7 +245,7 @@ async def show_periods_menu(
         text,
         InlineKeyboardMarkup(keyboard),
         message_id,
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -259,7 +269,7 @@ async def show_period_stats(
     d_users = current["users"] - previous["users"]
 
     lines = [
-        f"📅 **آمار {bounds['title']}**\n",
+        f"📅 <b>آمار {bounds['title']}</b>\n",
         f"🗓 {bounds['label']} — به وقت تهران",
         "─" * 25,
         f"📥 کل دانلودها: {current['total']}",
@@ -270,7 +280,7 @@ async def show_period_stats(
             f" 📥 {_signed(d_total)} | 👥 {_signed(d_users)}\n"
         ),
         "─" * 25 + "\n",
-        "🏆 **۱۰ پرطرفدار دوره:**\n",
+        "🏆 <b>۱۰ پرطرفدار دوره:</b>\n",
     ]
 
     if not current["top"]:
@@ -290,15 +300,14 @@ async def show_period_stats(
                     anime.get("part_num"),
                 ),
             )
-            lines.append(f"{medal} **{title}**")
+            lines.append(f"{medal} <b>{html.escape(title)}</b>")
             lines.append(
                 f"   👥 {anime['users_count']} نفر"
                 f" | 📥 {anime['total_count']} بار\n"
             )
 
     keyboard = [
-        [InlineKeyboardButton(
-            "🔙 بازگشت", callback_data="stats_periods")],
+        [ib("🔙 بازگشت", callback_data="stats_periods")],
     ]
 
     await safe_edit_or_send(
@@ -307,7 +316,7 @@ async def show_period_stats(
         "\n".join(lines),
         InlineKeyboardMarkup(keyboard),
         message_id,
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -332,7 +341,7 @@ async def show_reports_stats(
     page_reports = listed[start: start + per_page]
 
     lines = [
-        "🔴 **گزارش‌های خرابی لینک**\n",
+        "🔴 <b>گزارش‌های خرابی لینک</b>\n",
         f"📊 کل گزارش‌ها: {len(reports)}",
         f"⏳ در انتظار بررسی: {len(pending)}",
         f"✅ بررسی شده: {len(resolved)}\n",
@@ -351,8 +360,8 @@ async def show_reports_stats(
             # 📝 یعنی کاربر توضیحات نوشته است (R8c)
             note = " 📝" if report.get("report_text") else ""
             lines.append(
-                f"{idx}. {icon} **{report['anime_name']}** "
-                f"({report['quality']}){note}"
+                f"{idx}. {icon} <b>{html.escape(report['anime_name'])}</b> "
+                f"({html.escape(report['quality'])}){note}"
             )
             lines.append(f"   🆔 کاربر: {report['user_id']}")
             lines.append(f"   📅 تاریخ: {fmt_tehran(report['created_at'])}")
@@ -363,35 +372,23 @@ async def show_reports_stats(
 
     keyboard = []
     if only_pending:
-        keyboard.append([InlineKeyboardButton(
-            "📋 همه گزارش‌ها",
-            callback_data="stats_reports_filter:all",
-        )])
+        keyboard.append([ib("📋 همه گزارش‌ها", callback_data="stats_reports_filter:all")])
     else:
-        keyboard.append([InlineKeyboardButton(
-            "⏳ فقط در انتظار",
-            callback_data="stats_reports_filter:pending",
-        )])
+        keyboard.append([ib("⏳ فقط در انتظار", callback_data="stats_reports_filter:pending")])
 
     # R8c: «حل شد» + «جزئیات» در یک ردیف برای هر گزارش
     for report in page_reports:
         row = []
         if report["status"] == "pending":
             row.append(
-                InlineKeyboardButton(
-                    f"✅ حل شد #{report['id']}",
-                    callback_data=(
+                ib(f"✅ حل شد #{report['id']}", callback_data=(
                         f"resolve_report:{report['id']}:{page}:{f}"
-                    ),
-                )
+                    ))
             )
         row.append(
-            InlineKeyboardButton(
-                f"🔍 جزئیات #{report['id']}",
-                callback_data=(
+            ib(f"🔍 جزئیات #{report['id']}", callback_data=(
                     f"report_detail:{report['id']}:{page}:{f}"
-                ),
-            )
+                ))
         )
         keyboard.append(row)
 
@@ -404,8 +401,7 @@ async def show_reports_stats(
     )
     if nav:
         keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton(
-        "🔙 بازگشت", callback_data="stats_back")])
+    keyboard.append([ib("🔙 بازگشت", callback_data="stats_back")])
 
     await safe_edit_or_send(
         context,
@@ -413,7 +409,7 @@ async def show_reports_stats(
         "\n".join(lines),
         InlineKeyboardMarkup(keyboard),
         message_id,
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -429,10 +425,7 @@ async def show_report_detail(
     back = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(
-                    "🔙 بازگشت به گزارش‌ها",
-                    callback_data=f"stats_reports_go:{page}:{f}",
-                )
+                ib("🔙 بازگشت به گزارش‌ها", callback_data=f"stats_reports_go:{page}:{f}")
             ]
         ]
     )
@@ -453,11 +446,7 @@ async def show_report_detail(
         report.get("season_num"),
         report.get("part_num"),
         report.get("anime_type"),
-        display=db.get_display_for(
-            report["anime_name"],
-            report.get("season_num"),
-            report.get("part_num"),
-        ),
+        display=_display_for_row(report),
     )
     uname = (
         f"@{report['reporter_username']}"
@@ -471,7 +460,7 @@ async def show_report_detail(
     )
     channel = report.get("channel_chat_id") or "کانال پیش‌فرض"
 
-    # بدون parse_mode: متن آزاد کاربر ممکن است مارک‌داون را بشکند.
+    # بدون parse_mode: متن آزاد کاربر خام نمایش داده می‌شود (ایمن).
     text = "\n".join(
         [
             f"🔍 جزئیات گزارش #{report['id']}",
@@ -532,11 +521,7 @@ async def _resolve_report(
             report.get("season_num"),
             report.get("part_num"),
             report.get("anime_type"),
-            display=db.get_display_for(
-                report["anime_name"],
-                report.get("season_num"),
-                report.get("part_num"),
-            ),
+            display=_display_for_row(report),
         )
         notice = Msg.REPORT_RESOLVED_NOTICE.format(
             title=f"{title} ({report['quality']})"

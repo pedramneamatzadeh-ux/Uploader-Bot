@@ -1,10 +1,12 @@
 import logging
 import re
 
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
+    ContextTypes,
     ConversationHandler,
     MessageHandler,
     filters,
@@ -39,7 +41,6 @@ from .constants import (
     ONGOING_DETAIL,
     ONGOING_EDIT,
     ONGOING_LIST,
-    ONGOING_MENU,
     ONGOING_UPLOAD_CONFIRM,
     ONGOING_UPLOAD_DB_SELECT,
     ONGOING_UPLOAD_EPISODE,
@@ -52,8 +53,8 @@ from .constants import (
     ONGOING_UPLOAD_SINGLE_RANGE,
     PART_NUM,
     POST_MANAGE_DETAIL,
+    POST_MANAGE_EDIT,
     POST_MANAGE_LIST,
-    POST_MENU,
     POST_UPLOAD_MESSAGES,
     POST_UPLOAD_NAME,
     SEASON_NUM,
@@ -98,7 +99,6 @@ from .handlers.ongoing import (
     handle_ongoing_manage_callback,
     handle_ongoing_upload_mode_callback,
     handle_ongoing_upload_select_callback,
-    ongoing_menu_handler,
     ongoing_multi_ask_more_callback,
     ongoing_multi_quality_callback,
     ongoing_single_quality_callback,
@@ -114,9 +114,10 @@ from .handlers.ongoing import (
 from .handlers.posts import (
     cancel_posts,
     handle_post_manage_callback,
-    post_menu_handler,
+    preview_post,  # noqa: F401  (B4 — برای تست/صادرسازی)
     receive_post_messages,
     receive_post_name,
+    receive_post_rename,
     start_posts,
 )
 from .handlers.stats import handle_stats_callback, show_stats
@@ -249,10 +250,6 @@ def _build_ongoing_conversation(quality_pattern: str) -> ConversationHandler:
                 "^انیمه‌های درحال پخش$"), start_ongoing),
         ],
         states={
-            ONGOING_MENU: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND,
-                               ongoing_menu_handler),
-            ],
             ONGOING_LIST: [
                 CallbackQueryHandler(handle_ongoing_manage_callback),
             ],
@@ -489,10 +486,6 @@ def _build_post_conversation() -> ConversationHandler:
             MessageHandler(filters.Regex("^📝 پست‌ها$"), start_posts),
         ],
         states={
-            POST_MENU: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND,
-                               post_menu_handler),
-            ],
             POST_UPLOAD_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND,
                                receive_post_name),
@@ -506,6 +499,11 @@ def _build_post_conversation() -> ConversationHandler:
             ],
             POST_MANAGE_DETAIL: [
                 CallbackQueryHandler(handle_post_manage_callback),
+            ],
+            POST_MANAGE_EDIT: [
+                # B4: انتظار متن «نام جدید پست»
+                MessageHandler(filters.TEXT & ~filters.COMMAND,
+                               receive_post_rename),
             ],
         },
         fallbacks=[
@@ -614,6 +612,25 @@ def _build_report_conversation() -> ConversationHandler:
     )
 
 
+async def _global_error_handler(
+    update: object, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """P7: خطای غیرمنتظره ⇒ لاگ کامل + اطلاع خصوصی به مالک."""
+    error = context.error
+    logger.error("خطای غیرمنتظره", exc_info=error)
+    if config.OWNER_ID:
+        try:
+            await context.bot.send_message(
+                config.OWNER_ID,
+                (
+                    "⚠️ خطای غیرمنتظره در ربات:\n"
+                    f"{type(error).__name__}: {error}"
+                )[:4000],
+            )
+        except TelegramError:
+            logger.warning("ارسال اطلاع خطا به مالک ممکن نشد")
+
+
 def build_application() -> Application:
     application = Application.builder().token(config.BOT_TOKEN).build()
 
@@ -674,5 +691,8 @@ def build_application() -> Application:
             "settings": settings_conv,
         },
     )
+
+    # P7: هندلر سراسری خطا
+    application.add_error_handler(_global_error_handler)
 
     return application

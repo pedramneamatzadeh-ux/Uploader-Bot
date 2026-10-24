@@ -108,6 +108,67 @@ class DisplayMixin:
             )
             return cursor.rowcount > 0
 
+    # ------------------------------------------------------------------
+    # B1: نام ظاهری در سطح *لینک* (session_id) — دکمه جزئیات لینک
+    # ------------------------------------------------------------------
+    def get_link_display(self, session_id: str) -> Optional[str]:
+        """alias اختصاصی خود لینک؛ None یعنی ارثی (فصل → نام → واقعی)."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT display_name FROM link_display_names "
+                "WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return row["display_name"] if row else None
+
+    def set_link_display(
+        self,
+        session_id: str,
+        display_name: str,
+    ) -> None:
+        """ثبت/به‌روزرسانی alias سطح لینک (فقط همین لینک)."""
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO link_display_names
+                    (session_id, display_name, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                """,
+                (session_id, display_name),
+            )
+
+    def clear_link_display(self, session_id: str) -> bool:
+        """حذف alias سطح لینک ⇒ بازگشت به ارثی فصل/نام/واقعی."""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM link_display_names WHERE session_id = ?",
+                (session_id,),
+            )
+            return cursor.rowcount > 0
+
+    def get_effective_display_for_link(
+        self,
+        session_id: str,
+    ) -> Optional[str]:
+        """نام ظاهری مؤثر یک لینک: alias خود لینک → فصل/پارت → سطح-نام
+        → نام واقعی. اگر لینک وجود نداشته باشد None."""
+        with self.connect() as connection:
+            link = connection.execute(
+                "SELECT anime_name, season_num, part_num "
+                "FROM uploads WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        if not link:
+            return None
+        own = self.get_link_display(session_id)
+        if own:
+            return own
+        return self.get_display_for(
+            link["anime_name"],
+            link["season_num"],
+            link["part_num"],
+        )
+
     def set_display_names(
         self,
         anime_names: List[str],
@@ -221,11 +282,30 @@ class DisplayMixin:
                     ) AS is_cinema,
                     MAX(created_at) AS last_created
                 FROM uploads
+                WHERE session_id NOT IN (
+                    SELECT session_id FROM link_display_names
+                )
                 GROUP BY
                     anime_name,
                     COALESCE(anime_type, ''),
                     COALESCE(season_num, ''),
                     COALESCE(part_num, '')
+                """
+            ).fetchall()
+            # B1: لینک‌هایی که alias اختصاصی دارند ⇒ عضو لینک‌محور جدا
+            aliased_rows = connection.execute(
+                """
+                SELECT
+                    uploads.session_id,
+                    uploads.anime_name,
+                    COALESCE(uploads.anime_type, '') AS anime_type,
+                    COALESCE(uploads.season_num, '') AS season_num,
+                    COALESCE(uploads.part_num, '') AS part_num,
+                    uploads.created_at AS last_created,
+                    link_display_names.display_name AS display_name
+                FROM uploads
+                JOIN link_display_names
+                    ON uploads.session_id = link_display_names.session_id
                 """
             ).fetchall()
             alias_rows = connection.execute(
@@ -247,6 +327,37 @@ class DisplayMixin:
                 season_labels[key] = alias_row["display_name"]
 
         groups: Dict[str, Dict[str, Any]] = {}
+
+        def _add_group(
+            display: str,
+            physical: str,
+            member: Dict[str, Any],
+            links: int,
+            cinema: int,
+            last_created: Any,
+        ) -> None:
+            group = groups.get(display)
+            if group is None:
+                groups[display] = {
+                    "display_name": display,
+                    "names": [physical],
+                    "members": [member],
+                    "links": links,
+                    "cinema": cinema,
+                    "last_created": last_created,
+                }
+                return
+
+            if physical not in group["names"]:
+                group["names"].append(physical)
+            group["members"].append(member)
+            group["links"] += links
+            group["cinema"] = max(group["cinema"], cinema)
+            if last_created and (
+                not group["last_created"] or last_created > group["last_created"]
+            ):
+                group["last_created"] = last_created
+
         for row in rows:
             physical = row["anime_name"]
             season = row["season_num"] or ""
@@ -264,29 +375,36 @@ class DisplayMixin:
                 "links": row["links"],
                 "is_cinema": row["is_cinema"],
             }
+            _add_group(
+                display,
+                physical,
+                member,
+                row["links"],
+                row["is_cinema"],
+                row["last_created"],
+            )
 
-            group = groups.get(display)
-            if group is None:
-                groups[display] = {
-                    "display_name": display,
-                    "names": [physical],
-                    "members": [member],
-                    "links": row["links"],
-                    "cinema": row["is_cinema"],
-                    "last_created": row["last_created"],
-                }
-                continue
-
-            if physical not in group["names"]:
-                group["names"].append(physical)
-            group["members"].append(member)
-            group["links"] += row["links"]
-            group["cinema"] = max(group["cinema"], row["is_cinema"])
-            last = row["last_created"]
-            if last and (
-                not group["last_created"] or last > group["last_created"]
-            ):
-                group["last_created"] = last
+        for row in aliased_rows:
+            physical = row["anime_name"]
+            cinema = 1 if (row["anime_type"] or "") == "سینمایی" else 0
+            member = {
+                "anime_name": physical,
+                "anime_type": row["anime_type"] or "",
+                "season_num": row["season_num"] or "",
+                "part_num": row["part_num"] or "",
+                "links": 1,
+                "is_cinema": cinema,
+                # نشانهٔ عضو لینک‌محور — سطح ۲ مستقیم به جزئیات می‌پرد
+                "session_id": row["session_id"],
+            }
+            _add_group(
+                row["display_name"],
+                physical,
+                member,
+                1,
+                cinema,
+                row["last_created"],
+            )
 
         result = list(groups.values())
 

@@ -6,13 +6,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardMarkup, Update
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
 from .config import config
 from .constants import Msg
 from .database import db
-from .keyboards import ONGOING_MENU_MARKUP, main_menu_for
+from .keyboards import main_menu_for
 
 
 logger = logging.getLogger(__name__)
@@ -525,8 +525,13 @@ async def safe_edit_or_send(
                 parse_mode=parse_mode,
             )
             return message_id
-        except Exception:
-            pass
+        except BadRequest as exc:
+            # P2: «message is not modified» خطا نیست — همان پیام فعلی است.
+            if "not modified" in str(exc).lower():
+                return message_id
+            logger.warning("ویرایش پیام %s ناموفق: %s", message_id, exc)
+        except TelegramError as exc:
+            logger.warning("ویرایش پیام %s ناموفق: %s", message_id, exc)
 
     sent = await context.bot.send_message(
         chat_id=chat_id,
@@ -553,12 +558,15 @@ async def go_to_main_menu(
     )
 
 
-async def go_to_ongoing_menu(
+async def go_to_ongoing_list(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
 ) -> None:
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text="📺 بخش انیمه‌های درحال پخش:",
-        reply_markup=ONGOING_MENU_MARKUP,
-    )
+    """B5: منوی درحال پخش حذف شد — بازگشت/لغو روی لیست مدیریت می‌نشیند."""
+    # ایمپورت تنبل برای جلوگیری از چرخه (views خودش از utils ایمپورت دارد)
+    from .handlers.ongoing.views import show_ongoing_anime_list
+
+    manage = context.user_data.setdefault("ongoing_manage", {})
+    manage["page"] = 0
+    manage.pop("list_message_id", None)
+    await show_ongoing_anime_list(chat_id, context, 0)

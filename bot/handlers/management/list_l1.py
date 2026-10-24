@@ -60,7 +60,7 @@ async def show_link_list(
     manage = _manage(context)
     mode = manage.get("mode", "list")
     term = manage.get("search_term")
-    sort = manage.get("sort", "alpha")
+    sort = manage.get("sort", "new")  # B3: پیش‌فرض = جدیدترین
 
     use_search = bool(mode == "search" and term)
     active_term = term if use_search else None

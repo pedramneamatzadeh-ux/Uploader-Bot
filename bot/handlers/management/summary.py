@@ -1,5 +1,6 @@
 """خلاصه داستان فصل (R10) — متن اجباری + عکس اختیاری؛ فقط در ربات ذخیره می‌شود."""
 
+import html
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -50,7 +51,7 @@ async def _show_panel(
 
     if not summary:
         text = (
-            f"📝 خلاصه داستان — {label}\n\n"
+            f"📝 خلاصه داستان — {html.escape(label)}\n\n"
             "هنوز خلاصه‌ای ثبت نشده است.\n"
             "متن خلاصه داستان این فصل را بفرست."
         )
@@ -68,16 +69,21 @@ async def _show_panel(
             logger.exception("خطا در ساخت لینک خلاصه %s", name)
             share_link = ""
         lines = [
-            f"📝 خلاصه داستان — {label}",
+            f"📝 خلاصه داستان — {html.escape(label)}",
             "",
-            summary.get("summary_text") or "",
+            html.escape(summary.get("summary_text") or ""),
             "",
             "🖼️ عکس: "
             + ("✅ دارد" if summary.get("photo_file_id") else "❌ ندارد"),
             f"📅 به‌روزرسانی: {fmt_tehran(summary.get('updated_at'))}",
         ]
         if share_link:
-            lines += ["", "🔗 لینک اشتراک‌گذاری:", share_link]
+            # B2: لینک mono (code) ⇒ با یک ضربه کپی می‌شود
+            lines += [
+                "",
+                "🔗 لینک اشتراک‌گذاری:",
+                f"<code>{share_link}</code>",
+            ]
         text = "\n".join(lines)
         keyboard = [
             [
@@ -114,7 +120,9 @@ async def _show_panel(
 
     markup = InlineKeyboardMarkup(keyboard)
     msg_id = manage.get("list_message_id")
-    new_id = await safe_edit_or_send(context, chat_id, text, markup, msg_id)
+    new_id = await safe_edit_or_send(
+        context, chat_id, text, markup, msg_id, parse_mode="HTML"
+    )
     manage["list_message_id"] = new_id
     manage.pop("summary_wait", None)
     context.user_data["manage"] = manage
@@ -295,10 +303,14 @@ async def handle_summary_text(
             share_link = await build_download_link(
                 context, f"sm{saved['id']}"
             )
-            reply += f"\n🔗 لینک اشتراک‌گذاری:\n{share_link}"
+            # B2: لینک mono (code) ⇒ با یک ضربه کپی می‌شود
+            reply += (
+                "\n🔗 لینک اشتراک‌گذاری:"
+                f"\n<code>{share_link}</code>"
+            )
         except Exception:
             logger.exception("خطا در ساخت لینک خلاصه %s", name)
-    await update.message.reply_text(reply)
+    await update.message.reply_text(reply, parse_mode="HTML")
     return await _show_panel(chat_id, context, manage)
 
 

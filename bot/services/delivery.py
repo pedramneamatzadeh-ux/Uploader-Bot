@@ -1,13 +1,15 @@
+import asyncio
 import logging
 from typing import Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import TelegramError
+from telegram import InlineKeyboardMarkup, Update
+from telegram.error import RetryAfter, TelegramError
 from telegram.ext import ContextTypes
 
 from ..config import config
 from ..constants import Msg
 from ..database import db
+from ..keyboards import ib
 from ..utils import (
     get_default_channel_chat_id,
     parse_range,
@@ -78,6 +80,16 @@ async def deliver_files_for_session(
         await message.reply_text(Msg.NO_STORAGE_CHANNEL)
         return True
 
+    # P14: پیش‌چک دسترسی به کانال منبع (به‌جای N خطای تکی)
+    try:
+        await context.bot.get_chat(from_chat_id)
+    except TelegramError as err:
+        logger.warning(
+            "دسترسی به کانال منبع %s ممکن نیست: %s", from_chat_id, err
+        )
+        await message.reply_text(Msg.CHANNEL_UNREACHABLE)
+        return True
+
     start_id, end_id = rng
     prep_msg = await message.reply_text(Msg.PREPARING)
 
@@ -86,17 +98,32 @@ async def deliver_files_for_session(
     sent_message_ids = [prep_msg.message_id]
 
     for msg_id in range(start_id, end_id + 1):
-        try:
-            copied = await context.bot.copy_message(
-                chat_id=chat.id,
-                from_chat_id=from_chat_id,
-                message_id=msg_id,
-            )
-            sent_count += 1
-            sent_message_ids.append(copied.message_id)
-        except TelegramError as error:
-            logger.error("خطا در کپی پیام %s: %s", msg_id, error)
-            failed_ids.append(msg_id)
+        # P10: در صورت RetryAfter صبر کن و یک‌بار تلاش مجدد
+        for attempt in (1, 2):
+            try:
+                copied = await context.bot.copy_message(
+                    chat_id=chat.id,
+                    from_chat_id=from_chat_id,
+                    message_id=msg_id,
+                )
+                sent_count += 1
+                sent_message_ids.append(copied.message_id)
+                break
+            except RetryAfter as error:
+                if attempt == 2:
+                    logger.error(
+                        "RetryAfter برای پیام %s کافی نبود", msg_id
+                    )
+                    failed_ids.append(msg_id)
+                    break
+                logger.warning(
+                    "RetryAfter %ss برای پیام %s", error.retry_after, msg_id
+                )
+                await asyncio.sleep(error.retry_after + 0.1)
+            except TelegramError as error:
+                logger.error("خطا در کپی پیام %s: %s", msg_id, error)
+                failed_ids.append(msg_id)
+                break
 
     if sent_count:
         db.record_download(session_id, user.id)
@@ -127,10 +154,7 @@ async def deliver_files_for_session(
         report_kb = InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton(
-                        "🔴 گزارش خرابی فایل‌ها",
-                        callback_data=f"report:{session_id}",
-                    )
+                    ib("🔴 گزارش خرابی فایل‌ها", "danger", callback_data=f"report:{session_id}")
                 ]
             ]
         )
@@ -213,28 +237,57 @@ async def deliver_post_for_session(
         await message.reply_text("❌ این پست خالی است.")
         return True
 
+    # P14: پیش‌چک دسترسی به چت منبع پست
+    try:
+        await context.bot.get_chat(messages[0]["chat_id"])
+    except TelegramError as err:
+        logger.warning(
+            "دسترسی به چت منبع پست %s ممکن نیست: %s", post_id, err
+        )
+        await message.reply_text(Msg.CHANNEL_UNREACHABLE)
+        return True
+
     prep_msg = await message.reply_text(Msg.PREPARING)
     sent_message_ids = [prep_msg.message_id]
     sent_count = 0
 
     for post_msg in messages:
-        try:
-            copied = await context.bot.copy_message(
-                chat_id=chat.id,
-                from_chat_id=post_msg["chat_id"],
-                message_id=post_msg["message_id"],
-            )
-            sent_count += 1
-            sent_message_ids.append(copied.message_id)
-        except TelegramError as err:
-            logger.error(
-                "خطا در کپی پیام پست %s msg=%s: %s",
-                post_id,
-                post_msg["message_id"],
-                err,
-            )
+        # P10: در صورت RetryAfter صبر کن و یک‌بار تلاش مجدد
+        for attempt in (1, 2):
+            try:
+                copied = await context.bot.copy_message(
+                    chat_id=chat.id,
+                    from_chat_id=post_msg["chat_id"],
+                    message_id=post_msg["message_id"],
+                )
+                sent_count += 1
+                sent_message_ids.append(copied.message_id)
+                break
+            except RetryAfter as err:
+                if attempt == 2:
+                    logger.error(
+                        "RetryAfter برای پیام پست %s کافی نبود",
+                        post_msg["message_id"],
+                    )
+                    break
+                logger.warning(
+                    "RetryAfter %ss برای پیام پست %s",
+                    err.retry_after,
+                    post_msg["message_id"],
+                )
+                await asyncio.sleep(err.retry_after + 0.1)
+            except TelegramError as err:
+                logger.error(
+                    "خطا در کپی پیام پست %s msg=%s: %s",
+                    post_id,
+                    post_msg["message_id"],
+                    err,
+                )
+                break
 
     if sent_count:
+        # B4: ثبت آمار تحویل پست
+        db.record_post_delivery(post_id, user.id)
         final_msg = await message.reply_text(
             f"✅ پست «{post['post_name']}» ارسال شد.\n"
             f"📨 تعداد پیام‌ها: {sent_count}"

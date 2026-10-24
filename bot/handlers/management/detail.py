@@ -94,14 +94,18 @@ async def show_link_detail(
     )
     lines.append(f"🗄️ دیتابیس: {db_name}")
     physical_name = link["anime_name"]
-    # R12: نام ظاهری مؤثر برای همین فصل/پارت (پیش‌فرض = نام واقعی)
-    display_name = db.get_display_for(
+    # B1: نام ظاهری مؤثر — alias خود لینک اولویت دارد، وگرنه ارثی فصل
+    inherited_display = db.get_display_for(
         physical_name,
         link.get("season_num"),
         link.get("part_num"),
     )
+    own_display = db.get_link_display(session_id)
     lines.append(f"📛 نام واقعی: {physical_name}")
-    lines.append(f"🎭 نام ظاهری: {display_name}")
+    if own_display:
+        lines.append(f"🎭 نام ظاهری: {own_display} (همین لینک)")
+    else:
+        lines.append(f"🎭 نام ظاهری: {inherited_display} (از فصل)")
 
     if is_cinema:
         lines.append(
@@ -142,7 +146,7 @@ async def show_link_detail(
             ],
             [
                 ib(
-                    "🎭 ویرایش نام ظاهری (همین فصل)",
+                    "🎭 ویرایش نام ظاهری (همین لینک)",
                     callback_data=f"edit:alias:{session_id}",
                 )
             ],
@@ -175,7 +179,7 @@ async def show_link_detail(
             ],
             [
                 ib(
-                    "🎭 ویرایش نام ظاهری (همین فصل)",
+                    "🎭 ویرایش نام ظاهری (همین لینک)",
                     callback_data=f"edit:alias:{session_id}",
                 )
             ],

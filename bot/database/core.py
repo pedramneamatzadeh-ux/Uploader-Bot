@@ -24,6 +24,8 @@ class CoreMixin:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        # P14: اگر نوشتن دیگری قفل را نگه داشت، تا ۵ ثانیه صبر کن
+        connection.execute("PRAGMA busy_timeout = 5000")
 
         try:
             yield connection
@@ -109,6 +111,16 @@ class CoreMixin:
                         ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS post_deliveries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    post_id TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    delivered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (post_id)
+                        REFERENCES posts(post_id)
+                        ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS custom_databases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -123,6 +135,14 @@ class CoreMixin:
                     part_num TEXT NOT NULL DEFAULT '',
                     display_name TEXT NOT NULL,
                     PRIMARY KEY (anime_name, season_num, part_num)
+                );
+
+                CREATE TABLE IF NOT EXISTS link_display_names (
+                    session_id TEXT PRIMARY KEY
+                        REFERENCES uploads(session_id)
+                        ON DELETE CASCADE,
+                    display_name TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS settings (
@@ -192,8 +212,12 @@ class CoreMixin:
             for migration in migrations:
                 try:
                     connection.execute(migration)
-                except sqlite3.OperationalError:
-                    pass
+                except sqlite3.OperationalError as exc:
+                    # P8: فقط «ستون تکراری» بی‌ضرر است؛ بقیه خطاها لاگ شوند.
+                    if "duplicate column" not in str(exc).lower():
+                        logger.warning(
+                            "مهاجرت %s ناموفق بود: %s", migration, exc
+                        )
 
             # --- R12-1: مهاجرت جدول نام ظاهری به سطح (نام، فصل، پارت) ---
             # ردیف‌های قدیمی (به‌ازای کل نام واقعی) با season='' و part=''

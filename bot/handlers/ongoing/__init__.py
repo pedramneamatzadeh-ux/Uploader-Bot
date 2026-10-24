@@ -17,7 +17,6 @@ from ...constants import (
     ONGOING_EDIT,
     ONGOING_FIELD_MAP,
     ONGOING_LIST,
-    ONGOING_MENU,
     ONGOING_UPLOAD_CONFIRM,
     ONGOING_UPLOAD_DB_SELECT,
     ONGOING_UPLOAD_EPISODE,
@@ -34,7 +33,6 @@ from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
     ONGOING_CANCEL_MENU,
-    ONGOING_MENU_MARKUP,
     ONGOING_PART_MENU,
     build_pagination_row,
     main_menu_for,
@@ -44,7 +42,7 @@ from ...utils import (
     build_download_link,
     fmt_tehran,
     get_default_channel_chat_id,
-    go_to_ongoing_menu,
+    go_to_ongoing_list,
     normalize_optional_text,
     safe_edit_or_send,
     total_pages,
@@ -58,7 +56,6 @@ from .inputs import handle_ongoing_edit_input
 from .manage import handle_ongoing_manage_callback
 from .upload import handle_ongoing_upload_mode_callback
 from .upload import handle_ongoing_upload_select_callback
-from .menu import ongoing_menu_handler
 from .upload import ongoing_multi_ask_more_callback
 from .upload import ongoing_multi_quality_callback
 from .upload import ongoing_single_quality_callback
@@ -78,7 +75,6 @@ __all__ = [
     "handle_ongoing_manage_callback",
     "handle_ongoing_upload_mode_callback",
     "handle_ongoing_upload_select_callback",
-    "ongoing_menu_handler",
     "ongoing_multi_ask_more_callback",
     "ongoing_multi_quality_callback",
     "ongoing_single_quality_callback",

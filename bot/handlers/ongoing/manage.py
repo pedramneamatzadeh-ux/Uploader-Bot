@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import Any, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ...config import config
@@ -17,7 +17,6 @@ from ...constants import (
     ONGOING_EDIT,
     ONGOING_FIELD_MAP,
     ONGOING_LIST,
-    ONGOING_MENU,
     ONGOING_UPLOAD_CONFIRM,
     ONGOING_UPLOAD_DB_SELECT,
     ONGOING_UPLOAD_EPISODE,
@@ -34,9 +33,9 @@ from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
     ONGOING_CANCEL_MENU,
-    ONGOING_MENU_MARKUP,
     ONGOING_PART_MENU,
     build_pagination_row,
+    ib,
     main_menu_for,
     quality_keyboard,
 )
@@ -44,7 +43,7 @@ from ...utils import (
     build_download_link,
     fmt_tehran,
     get_default_channel_chat_id,
-    go_to_ongoing_menu,
+    go_to_main_menu,
     normalize_optional_text,
     safe_edit_or_send,
     total_pages,
@@ -79,15 +78,23 @@ async def handle_ongoing_manage_callback(
     await query.answer()
 
     chat_id = query.message.chat_id
+    message_id = query.message.message_id
     data = query.data
     manage = context.user_data.get("ongoing_manage", {})
 
     if data == "og_back_menu":
-        await query.edit_message_text("✅ به منوی انیمه‌های درحال پخش برگشتید.")
-        await go_to_ongoing_menu(context, chat_id)
-        return ONGOING_MENU
+        # B5: منوی میانی حذف شد — این دکمه خروج به منوی اصلی است
+        await query.edit_message_text("✅ به منوی اصلی بازگشتید.")
+        await go_to_main_menu(context, chat_id)
+        return ConversationHandler.END
 
     if data in ("og_back_list", "og_refresh"):
+        # رفع باگ: پیام فعلی (جزئیات) درجا به لیست تبدیل می‌شود؛
+        # ویرایش پیام لیستِ قدیمی با محتوای یکسان «not modified»
+        # می‌خورد و برای کاربر نامرئی بود.
+        manage["list_message_id"] = message_id
+        manage.pop("detail_message_id", None)
+        context.user_data["ongoing_manage"] = manage
         await show_ongoing_anime_list(chat_id, context, manage.get("page", 0))
         return ONGOING_LIST
 
@@ -107,6 +114,9 @@ async def handle_ongoing_manage_callback(
 
     if data.startswith("og_view:"):
         anime_id = int(data.split(":", 1)[1])
+        # رفع باگ: جزئیات درجا جای پیام لیست باز می‌شود (تک‌پیامی)
+        manage["detail_message_id"] = message_id
+        context.user_data["ongoing_manage"] = manage
         await show_ongoing_anime_detail(chat_id, context, anime_id)
         return ONGOING_DETAIL
 
@@ -126,10 +136,7 @@ async def handle_ongoing_manage_callback(
             kb = InlineKeyboardMarkup(
                 [
                     [
-                        InlineKeyboardButton(
-                            "ندارد ➖",
-                            callback_data=f"og_edit_part_none:{anime_id}",
-                        )
+                        ib("ندارد ➖", callback_data=f"og_edit_part_none:{anime_id}")
                     ]
                 ]
             )
@@ -221,14 +228,8 @@ async def handle_ongoing_manage_callback(
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
-                        InlineKeyboardButton(
-                            "✅ بله، برگردان",
-                            callback_data=f"og_unfinish_yes:{anime_id}",
-                        ),
-                        InlineKeyboardButton(
-                            "❌ انصراف",
-                            callback_data=f"og_view:{anime_id}",
-                        ),
+                        ib("✅ بله، برگردان", callback_data=f"og_unfinish_yes:{anime_id}"),
+                        ib("❌ انصراف", "danger", callback_data=f"og_view:{anime_id}"),
                     ]
                 ]
             ),
@@ -258,14 +259,8 @@ async def handle_ongoing_manage_callback(
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
-                        InlineKeyboardButton(
-                            "✅ بله، اتمام پخش کن",
-                            callback_data=f"og_finish_yes:{anime_id}",
-                        ),
-                        InlineKeyboardButton(
-                            "❌ انصراف",
-                            callback_data=f"og_view:{anime_id}",
-                        ),
+                        ib("✅ بله، اتمام پخش کن", callback_data=f"og_finish_yes:{anime_id}"),
+                        ib("❌ انصراف", "danger", callback_data=f"og_view:{anime_id}"),
                     ]
                 ]
             ),
@@ -276,12 +271,8 @@ async def handle_ongoing_manage_callback(
         anime_id = int(data.split(":", 1)[1])
         keyboard = [
             [
-                InlineKeyboardButton(
-                    "✅ بله، حذف کن",
-                    callback_data=f"og_confirm_delete:{anime_id}",
-                ),
-                InlineKeyboardButton(
-                    "❌ خیر", callback_data=f"og_view:{anime_id}"),
+                ib("✅ بله، حذف کن", callback_data=f"og_confirm_delete:{anime_id}"),
+                ib("❌ خیر", "danger", callback_data=f"og_view:{anime_id}"),
             ]
         ]
         await query.edit_message_text(

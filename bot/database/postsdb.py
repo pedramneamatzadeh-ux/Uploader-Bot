@@ -198,3 +198,73 @@ class PostsMixin:
             )
 
             return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # B4: آمار تحویل پست‌ها + تغییر نام
+    # ------------------------------------------------------------------
+    def record_post_delivery(
+        self,
+        post_id: str,
+        user_id: int,
+    ) -> None:
+        """ثبت یک تحویل موفق پست (برای آمار «📥 N بار | 👥 M کاربر»)."""
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO post_deliveries (post_id, user_id)
+                VALUES (?, ?)
+                """,
+                (post_id, user_id),
+            )
+
+    def get_post_delivery_stats(
+        self,
+        post_id: str,
+    ) -> Dict[str, int]:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(DISTINCT user_id) AS users
+                FROM post_deliveries
+                WHERE post_id = ?
+                """,
+                (post_id,),
+            ).fetchone()
+        if not row:
+            return {"total": 0, "users": 0}
+        return {"total": row["total"] or 0, "users": row["users"] or 0}
+
+    def get_all_post_delivery_stats(self) -> Dict[str, Dict[str, int]]:
+        """آمار تحویل همه پست‌ها یک‌جا (برای لیست)."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    post_id,
+                    COUNT(*) AS total,
+                    COUNT(DISTINCT user_id) AS users
+                FROM post_deliveries
+                GROUP BY post_id
+                """
+            ).fetchall()
+        return {
+            row["post_id"]: {
+                "total": row["total"] or 0,
+                "users": row["users"] or 0,
+            }
+            for row in rows
+        }
+
+    def rename_post(
+        self,
+        post_id: str,
+        new_name: str,
+    ) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE posts SET post_name = ? WHERE post_id = ?",
+                (new_name, post_id),
+            )
+            return cursor.rowcount > 0

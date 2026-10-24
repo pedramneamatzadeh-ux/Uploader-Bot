@@ -95,6 +95,9 @@ async def show_group_list(
             )
             if multi_name and group.get("anime_name"):
                 label = f"{group['anime_name']} — {label}"
+            if group.get("session_id"):
+                # B1: عضو لینک‌محور — یک لینک با alias اختصاصی
+                label += " — 🔗 لینک جدا"
             lines.append(
                 f"{idx + 1}. {label} ({group.get('links', 0)} لینک)"
             )

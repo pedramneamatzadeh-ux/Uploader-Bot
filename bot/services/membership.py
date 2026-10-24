@@ -1,7 +1,9 @@
 import logging
 from typing import List, Union
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, Update
+
+from ..keyboards import ib
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
@@ -59,10 +61,7 @@ async def send_join_prompt(
         if join_url:
             keyboard.append(
                 [
-                    InlineKeyboardButton(
-                        f"عضویت در {channel_display_name(channel)}",
-                        url=join_url,
-                    )
+                    ib(f"عضویت در {channel_display_name(channel)}", url=join_url)
                 ]
             )
             continue
@@ -75,19 +74,13 @@ async def send_join_prompt(
             if getattr(chat, "username", None):
                 keyboard.append(
                     [
-                        InlineKeyboardButton(
-                            f"عضویت در {title}",
-                            url=f"https://t.me/{chat.username}",
-                        )
+                        ib(f"عضویت در {title}", url=f"https://t.me/{chat.username}")
                     ]
                 )
             elif getattr(chat, "invite_link", None):
                 keyboard.append(
                     [
-                        InlineKeyboardButton(
-                            f"عضویت در {title}",
-                            url=chat.invite_link,
-                        )
+                        ib(f"عضویت در {title}", url=chat.invite_link)
                     ]
                 )
             else:
@@ -95,10 +88,7 @@ async def send_join_prompt(
                     invite = await context.bot.create_chat_invite_link(channel)
                     keyboard.append(
                         [
-                            InlineKeyboardButton(
-                                f"عضویت در {title}",
-                                url=invite.invite_link,
-                            )
+                            ib(f"عضویت در {title}", url=invite.invite_link)
                         ]
                     )
                 except TelegramError:
@@ -108,10 +98,7 @@ async def send_join_prompt(
 
     keyboard.append(
         [
-            InlineKeyboardButton(
-                "✅ عضو شدم، بررسی مجدد",
-                callback_data=f"recheck:{session_id}",
-            )
+            ib("✅ عضو شدم، بررسی مجدد", callback_data=f"recheck:{session_id}")
         ]
     )
 

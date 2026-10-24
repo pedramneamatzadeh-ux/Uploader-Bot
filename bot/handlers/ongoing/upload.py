@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import Any, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ...config import config
@@ -17,7 +17,6 @@ from ...constants import (
     ONGOING_EDIT,
     ONGOING_FIELD_MAP,
     ONGOING_LIST,
-    ONGOING_MENU,
     ONGOING_UPLOAD_CONFIRM,
     ONGOING_UPLOAD_DB_SELECT,
     ONGOING_UPLOAD_EPISODE,
@@ -34,9 +33,9 @@ from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
     ONGOING_CANCEL_MENU,
-    ONGOING_MENU_MARKUP,
     ONGOING_PART_MENU,
     build_pagination_row,
+    ib,
     main_menu_for,
     quality_keyboard,
 )
@@ -44,7 +43,7 @@ from ...utils import (
     build_download_link,
     fmt_tehran,
     get_default_channel_chat_id,
-    go_to_ongoing_menu,
+    go_to_ongoing_list,
     normalize_optional_text,
     safe_edit_or_send,
     total_pages,
@@ -87,8 +86,8 @@ async def show_ongoing_upload_select(
             "اول از بخش مدیریت، انیمه را ثبت کن."
         )
         keyboard = [
-            [InlineKeyboardButton("➕ افزودن انیمه", callback_data="og_add")],
-            [InlineKeyboardButton("🏠 بازگشت", callback_data="ogup_back_menu")],
+            [ib("➕ افزودن انیمه", callback_data="og_add")],
+            [ib("🏠 بازگشت", callback_data="ogup_back_menu")],
         ]
     else:
         lines = ["📤 برای آپلود قسمت جدید، انیمه را انتخاب کن:\n"]
@@ -105,10 +104,7 @@ async def show_ongoing_upload_select(
                 short = short[:19] + "..."
             keyboard.append(
                 [
-                    InlineKeyboardButton(
-                        f"{idx}. {short}",
-                        callback_data=f"ogup_sel:{item['id']}",
-                    )
+                    ib(f"{idx}. {short}", "primary", callback_data=f"ogup_sel:{item['id']}")
                 ]
             )
 
@@ -127,10 +123,8 @@ async def show_ongoing_upload_select(
 
         keyboard.append(
             [
-                InlineKeyboardButton("🎬 مدیریت انیمه‌ها",
-                                     callback_data="ogup_manage"),
-                InlineKeyboardButton(
-                    "🏠 بازگشت", callback_data="ogup_back_menu"),
+                ib("🎬 مدیریت انیمه‌ها", callback_data="ogup_manage"),
+                ib("🏠 بازگشت", callback_data="ogup_back_menu"),
             ]
         )
 
@@ -162,15 +156,11 @@ async def prompt_ongoing_db_or_episode(
 
     keyboard = [
         [
-            InlineKeyboardButton(
-                f"🗄️ {dbx['name']}",
-                callback_data=f"og_dbsel:{idx}",
-            )
+            ib(f"🗄️ {dbx['name']}", "primary", callback_data=f"og_dbsel:{idx}")
         ]
         for idx, dbx in enumerate(config.DATABASES)
     ]
-    keyboard.append([InlineKeyboardButton(
-        "❌ لغو", callback_data="og_dbsel_cancel")])
+    keyboard.append([ib("❌ لغو", "primary", callback_data="og_dbsel_cancel")])
 
     await query.edit_message_text(
         f"🎬 انیمه انتخاب‌شده: {anime_name}\n\nاز کدام دیتابیس می‌خواهی استفاده کنی؟",
@@ -190,8 +180,8 @@ async def select_ongoing_database(
     if query.data == "og_dbsel_cancel":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_ongoing_menu(context, query.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, query.message.chat_id)
+        return ONGOING_LIST
 
     idx = int(query.data.split(":", 1)[1])
     if idx < 0 or idx >= len(config.DATABASES):
@@ -230,8 +220,8 @@ async def handle_ongoing_upload_select_callback(
 
     if data == "ogup_back_menu":
         await query.edit_message_text("✅ به منوی انیمه‌های درحال پخش برگشتید.")
-        await go_to_ongoing_menu(context, chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, chat_id)
+        return ONGOING_LIST
 
     if data == "ogup_manage":
         context.user_data["ongoing_manage"] = {"page": 0}
@@ -293,22 +283,18 @@ async def receive_ongoing_upload_episode(
     upload = context.user_data.get("ongoing_upload")
     if not upload:
         await update.message.reply_text("❌ اطلاعات انیمه پیدا نشد. دوباره شروع کن.")
-        await go_to_ongoing_menu(context, update.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, update.message.chat_id)
+        return ONGOING_LIST
 
     upload["episode_range"] = text
 
     keyboard = [
         [
-            InlineKeyboardButton(
-                "🔥 سه کیفیت استاندارد 480/720/1080",
-                callback_data="ogup_mode:std3",
-            )
+            ib("🔥 سه کیفیت استاندارد 480/720/1080", "primary", callback_data="ogup_mode:std3")
         ],
-        [InlineKeyboardButton("🔸 چند کیفیت انتخابی",
-                              callback_data="ogup_mode:multi")],
-        [InlineKeyboardButton("🔹 تک کیفیت", callback_data="ogup_mode:single")],
-        [InlineKeyboardButton("❌ لغو", callback_data="ogup_cancel")],
+        [ib("🔸 چند کیفیت انتخابی", "primary", callback_data="ogup_mode:multi")],
+        [ib("🔹 تک کیفیت", "primary", callback_data="ogup_mode:single")],
+        [ib("❌ لغو", callback_data="ogup_cancel")],
     ]
     await update.message.reply_text(
         "نوع آپلود را انتخاب کن:",
@@ -330,8 +316,8 @@ async def handle_ongoing_upload_mode_callback(
     if data == "ogup_cancel":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_ongoing_menu(context, query.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, query.message.chat_id)
+        return ONGOING_LIST
 
     mode = data.split(":", 1)[1]
     upload = context.user_data.setdefault("ongoing_upload", {})
@@ -378,8 +364,8 @@ async def ongoing_single_quality_callback(
     if query.data == "ogup_cancel":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_ongoing_menu(context, query.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, query.message.chat_id)
+        return ONGOING_LIST
 
     quality = query.data.split(":", 1)[1]
     upload = context.user_data.setdefault("ongoing_upload", {})
@@ -424,8 +410,8 @@ async def ongoing_multi_quality_callback(
     if query.data == "ogup_cancel":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_ongoing_menu(context, query.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, query.message.chat_id)
+        return ONGOING_LIST
 
     quality = query.data.split(":", 1)[1]
     context.user_data["_ongoing_current_quality"] = quality
@@ -457,7 +443,7 @@ async def receive_ongoing_multi_range(
     quality = context.user_data.get("_ongoing_current_quality")
     if not quality:
         await update.message.reply_text("❌ کیفیت انتخاب نشده است. دوباره شروع کن.")
-        return ONGOING_MENU
+        return ONGOING_LIST
 
     upload["qualities"].append({"quality": quality, "channel_msg_range": text})
 
@@ -484,10 +470,9 @@ async def receive_ongoing_multi_range(
     context.user_data.pop("_ongoing_current_quality", None)
 
     keyboard = [
-        [InlineKeyboardButton("✅ بله، کیفیت بعدی",
-                              callback_data="ogup_add_more")],
-        [InlineKeyboardButton("❌ نه، تمام شد", callback_data="ogup_finish")],
-        [InlineKeyboardButton("🚫 لغو", callback_data="ogup_cancel")],
+        [ib("✅ بله، کیفیت بعدی", callback_data="ogup_add_more")],
+        [ib("❌ نه، تمام شد", callback_data="ogup_finish")],
+        [ib("🚫 لغو", callback_data="ogup_cancel")],
     ]
     await update.message.reply_text(
         "آیا کیفیت دیگری اضافه می‌کنی؟",
@@ -507,8 +492,8 @@ async def ongoing_multi_ask_more_callback(
     if query.data == "ogup_cancel":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_ongoing_menu(context, query.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, query.message.chat_id)
+        return ONGOING_LIST
 
     if query.data == "ogup_add_more":
         await query.edit_message_text(
@@ -563,10 +548,8 @@ async def show_ongoing_upload_confirm(
 
     keyboard = [
         [
-            InlineKeyboardButton("✅ تأیید و ساخت لینک",
-                                 callback_data="ogup_confirm"),
-            InlineKeyboardButton(
-                "❌ انصراف", callback_data="ogup_cancel_confirm"),
+            ib("✅ تأیید و ساخت لینک", callback_data="ogup_confirm"),
+            ib("❌ انصراف", callback_data="ogup_cancel_confirm"),
         ]
     ]
 
@@ -592,14 +575,14 @@ async def confirm_ongoing_upload(
     if query.data == "ogup_cancel_confirm":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_ongoing_menu(context, query.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, query.message.chat_id)
+        return ONGOING_LIST
 
     upload = context.user_data.get("ongoing_upload")
     if not upload:
         await query.edit_message_text("❌ اطلاعات آپلود پیدا نشد.")
-        await go_to_ongoing_menu(context, query.message.chat_id)
-        return ONGOING_MENU
+        await go_to_ongoing_list(context, query.message.chat_id)
+        return ONGOING_LIST
 
     admin_id = query.from_user.id
     links_text = ""
@@ -665,5 +648,5 @@ async def confirm_ongoing_upload(
         parse_mode="HTML",
     )
 
-    await go_to_ongoing_menu(context, query.message.chat_id)
-    return ONGOING_MENU
+    await go_to_ongoing_list(context, query.message.chat_id)
+    return ONGOING_LIST

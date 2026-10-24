@@ -17,7 +17,6 @@ from ...constants import (
     ONGOING_EDIT,
     ONGOING_FIELD_MAP,
     ONGOING_LIST,
-    ONGOING_MENU,
     ONGOING_UPLOAD_CONFIRM,
     ONGOING_UPLOAD_DB_SELECT,
     ONGOING_UPLOAD_EPISODE,
@@ -34,7 +33,6 @@ from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
     ONGOING_CANCEL_MENU,
-    ONGOING_MENU_MARKUP,
     ONGOING_PART_MENU,
     build_pagination_row,
     main_menu_for,
@@ -44,7 +42,7 @@ from ...utils import (
     build_download_link,
     fmt_tehran,
     get_default_channel_chat_id,
-    go_to_ongoing_menu,
+    go_to_ongoing_list,
     normalize_optional_text,
     safe_edit_or_send,
     total_pages,
@@ -74,9 +72,9 @@ async def handle_ongoing_text_cancel(
         context.user_data.pop("ongoing_edit", None)
         await update.message.reply_text(
             "❌ عملیات لغو شد.",
-            reply_markup=ONGOING_MENU_MARKUP,
+            reply_markup=main_menu_for(update.effective_user.id),
         )
-        return ONGOING_MENU
+        return ONGOING_LIST
 
     return None
 
@@ -88,6 +86,6 @@ async def cancel_ongoing(
     context.user_data.clear()
     await update.message.reply_text(
         "❌ عملیات لغو شد.",
-        reply_markup=ONGOING_MENU_MARKUP,
+        reply_markup=main_menu_for(update.effective_user.id),
     )
-    return ONGOING_MENU
+    return ONGOING_LIST

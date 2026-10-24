@@ -1,15 +1,17 @@
+import html
 import logging
 import sqlite3
 import uuid
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ..config import config
 from ..constants import (
     POST_MANAGE_DETAIL,
+    POST_MANAGE_EDIT,
     POST_MANAGE_LIST,
-    POST_MENU,
     POST_UPLOAD_MESSAGES,
     POST_UPLOAD_NAME,
     Msg,
@@ -18,12 +20,18 @@ from ..database import db
 from ..decorators import admin_only
 from ..keyboards import (
     POST_CANCEL_MENU,
-    POST_MENU_MARKUP,
     POST_UPLOAD_CANCEL_MENU,
     build_pagination_row,
+    ib,
     main_menu_for,
 )
-from ..utils import build_download_link, fmt_tehran, safe_edit_or_send, total_pages
+from ..utils import (
+    build_download_link,
+    fmt_tehran,
+    go_to_main_menu,
+    safe_edit_or_send,
+    total_pages,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -34,49 +42,11 @@ async def start_posts(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
+    """B9: ورود مستقیم به مدیریت پست‌ها (مشابه انیمه‌های درحال پخش)."""
     context.user_data.pop("post_upload", None)
-    context.user_data.pop("post_manage", None)
-    await update.message.reply_text(
-        "📝 بخش پست‌ها:",
-        reply_markup=POST_MENU_MARKUP,
-    )
-    return POST_MENU
-
-
-@admin_only
-async def post_menu_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-) -> int:
-    text = update.message.text.strip()
-
-    if text == "📤 آپلود پست":
-        context.user_data["post_upload"] = {"messages": []}
-        await update.message.reply_text(
-            "📝 نام پست را وارد کن:",
-            reply_markup=POST_CANCEL_MENU,
-        )
-        return POST_UPLOAD_NAME
-
-    if text == "📋 مدیریت پست‌ها":
-        context.user_data["post_manage"] = {"page": 0}
-        await show_post_list(update.message.chat_id, context, 0)
-        return POST_MANAGE_LIST
-
-    if text == "بازگشت به منوی اصلی":
-        context.user_data.pop("post_upload", None)
-        context.user_data.pop("post_manage", None)
-        await update.message.reply_text(
-            "✅ به منوی اصلی بازگشتید.",
-            reply_markup=main_menu_for(update.effective_user.id),
-        )
-        return ConversationHandler.END
-
-    await update.message.reply_text(
-        "لطفاً یکی از گزینه‌ها را انتخاب کن.",
-        reply_markup=POST_MENU_MARKUP,
-    )
-    return POST_MENU
+    context.user_data["post_manage"] = {"page": 0}
+    await show_post_list(update.message.chat_id, context, 0)
+    return POST_MANAGE_LIST
 
 
 @admin_only
@@ -87,12 +57,13 @@ async def receive_post_name(
     text = update.message.text.strip()
 
     if text == "لغو":
+        # B9: منوی پست‌ها حذف شده — بازگشت به لیست پست‌ها
         context.user_data.pop("post_upload", None)
         await update.message.reply_text(
             "❌ آپلود پست لغو شد.",
-            reply_markup=POST_MENU_MARKUP,
+            reply_markup=main_menu_for(update.effective_user.id),
         )
-        return POST_MENU
+        return POST_MANAGE_LIST
 
     context.user_data.setdefault("post_upload", {})["name"] = text
     context.user_data["post_upload"]["messages"] = []
@@ -116,12 +87,13 @@ async def receive_post_messages(
     text = (update.message.text or "").strip()
 
     if text == "لغو":
+        # B9: منوی پست‌ها حذف شده — بازگشت به لیست پست‌ها
         context.user_data.pop("post_upload", None)
         await update.message.reply_text(
             "❌ آپلود پست لغو شد.",
-            reply_markup=POST_MENU_MARKUP,
+            reply_markup=main_menu_for(update.effective_user.id),
         )
-        return POST_MENU
+        return POST_MANAGE_LIST
 
     if text == "✅ تمام شد":
         post_upload = context.user_data.get("post_upload", {})
@@ -150,10 +122,10 @@ async def receive_post_messages(
             logger.exception("خطا در ذخیره پست: %s", err)
             await update.message.reply_text(
                 Msg.SAVE_ERROR,
-                reply_markup=POST_MENU_MARKUP,
+                reply_markup=main_menu_for(update.effective_user.id),
             )
             context.user_data.pop("post_upload", None)
-            return POST_MENU
+            return POST_MANAGE_LIST
 
         link = await build_download_link(context, post_id)
         await update.message.reply_text(
@@ -161,10 +133,23 @@ async def receive_post_messages(
             f"📨 تعداد پیام‌ها: {len(messages)}\n\n"
             f"🔗 لینک پست:\n<code>{link}</code>",
             parse_mode="HTML",
-            reply_markup=POST_MENU_MARKUP,
+            reply_markup=main_menu_for(update.effective_user.id),
         )
         context.user_data.pop("post_upload", None)
-        return POST_MENU
+        # B9: رفرش لیست تا پست جدید دیده شود
+        manage = context.user_data.get("post_manage") or {"page": 0}
+        await show_post_list(
+            update.message.chat_id, context, manage.get("page", 0)
+        )
+        return POST_MANAGE_LIST
+
+    if getattr(update.message, "service", False):
+        # P14: پیام سرویسی (مثل عضویت/خروج) در پست ذخیره نمی‌شود
+        await update.message.reply_text(
+            "⚠️ پیام سرویسی در پست ذخیره نمی‌شود.",
+            reply_markup=POST_UPLOAD_CANCEL_MENU,
+        )
+        return POST_UPLOAD_MESSAGES
 
     post_upload = context.user_data.setdefault("post_upload", {"messages": []})
     post_upload.setdefault("messages", []).append(
@@ -185,13 +170,15 @@ async def cancel_posts(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
+    # B9: /cancel → بازگشت به لیست پست‌ها (پنل باز می‌ماند)
     context.user_data.pop("post_upload", None)
-    context.user_data.pop("post_manage", None)
+    context.user_data["post_manage"] = {"page": 0}
     await update.message.reply_text(
         "❌ عملیات لغو شد.",
-        reply_markup=POST_MENU_MARKUP,
+        reply_markup=main_menu_for(update.effective_user.id),
     )
-    return POST_MENU
+    await show_post_list(update.message.chat_id, context, 0)
+    return POST_MANAGE_LIST
 
 
 async def show_post_list(
@@ -207,23 +194,34 @@ async def show_post_list(
     if not items:
         text = "📋 لیست پست‌ها:\n\nهنوز پستی ثبت نشده است."
         keyboard = [
-            [InlineKeyboardButton("🏠 بازگشت", callback_data="pm_back_menu")],
+            [ib("📤 آپلود پست جدید", callback_data="pm_upload_new")],
+            [ib("🏠 منوی اصلی", callback_data="pm_back_menu")],
         ]
     else:
         lines = ["📋 لیست پست‌ها:\n"]
-        keyboard = []
+        keyboard = [
+            [ib("📤 آپلود پست جدید", callback_data="pm_upload_new")]
+        ]
 
+        delivery_stats = db.get_all_post_delivery_stats()
         for idx, item in enumerate(items, start=1):
             icon = "🟢" if item["status"] == "active" else "🔴"
-            lines.append(f"{idx}. {icon} {item['post_name']}")
+            # B4: شمار تحویل هر پست در لیست
+            d_total = (
+                delivery_stats.get(item["post_id"]) or {}
+            ).get("total", 0)
+            lines.append(
+                f"{idx}. {icon} {item['post_name']} — 📥 {d_total}"
+            )
             short = item["post_name"]
             if len(short) > 25:
                 short = short[:22] + "..."
             keyboard.append(
                 [
-                    InlineKeyboardButton(
+                    ib(
                         f"{idx}. {short}",
                         callback_data=f"pm_view:{item['post_id']}",
+                        style="primary",
                     )
                 ]
             )
@@ -242,7 +240,7 @@ async def show_post_list(
             keyboard.append(nav)
 
         keyboard.append(
-            [InlineKeyboardButton("🏠 بازگشت", callback_data="pm_back_menu")]
+            [ib("🏠 منوی اصلی", callback_data="pm_back_menu")]
         )
 
     msg_id = manage.get("list_message_id")
@@ -267,11 +265,15 @@ async def show_post_detail(
     messages = db.get_post_messages(post_id)
     status_text = "فعال ✅" if post["status"] == "active" else "غیرفعال 🔴"
     link = await build_download_link(context, post_id)
+    # B4: آمار تحویل پست
+    deliveries = db.get_post_delivery_stats(post_id)
 
     text = (
         "📋 جزئیات پست:\n\n"
-        f"📝 نام: {post['post_name']}\n"
+        f"📝 نام: {html.escape(post['post_name'])}\n"
         f"📨 تعداد پیام‌ها: {len(messages)}\n"
+        f"📥 تحویل: {deliveries['total']} بار"
+        f" | 👥 {deliveries['users']} کاربر یکتا\n"
         f"📊 وضعیت: {status_text}\n"
         f"👤 ایجاد کننده: {post['admin_id']}\n"
         f"📅 تاریخ ایجاد: {fmt_tehran(post['created_at'])}\n\n"
@@ -282,15 +284,20 @@ async def show_post_detail(
 
     keyboard = [
         [
-            InlineKeyboardButton(
-                toggle_label, callback_data=f"pm_toggle:{post_id}"),
-            InlineKeyboardButton(
-                "🗑️ حذف", callback_data=f"pm_delete:{post_id}"),
+            ib(toggle_label, callback_data=f"pm_toggle:{post_id}"),
+            ib("🗑️ حذف", callback_data=f"pm_delete:{post_id}"),
         ],
         [
-            InlineKeyboardButton("📋 بازگشت به لیست",
+            ib("✏️ تغییر نام", callback_data=f"pm_rename:{post_id}"),
+            ib(
+                "📨 پیش‌نمایش پیام‌ها",
+                callback_data=f"pm_preview:{post_id}",
+            ),
+        ],
+        [
+            ib("📋 بازگشت به لیست",
                                  callback_data="pm_back_list"),
-            InlineKeyboardButton("🏠 منو", callback_data="pm_back_menu"),
+            ib("🏠 منوی اصلی", callback_data="pm_back_menu"),
         ],
     ]
 
@@ -309,6 +316,94 @@ async def show_post_detail(
     context.user_data["post_manage"] = manage
 
 
+async def preview_post(
+    chat_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    post_id: str,
+) -> None:
+    """B4: کپی پیام‌های پست (به ترتیب) در چت مدیر برای مرور محتوا.
+
+    بدون admin_only: آرگومان اول chat_id است (نه Update) و تنها
+    فراخوان آن (handle_post_manage_callback) خودش admin_only است.
+    """
+    post = db.get_post(post_id)
+    messages = db.get_post_messages(post_id)
+    if not post or not messages:
+        await context.bot.send_message(
+            chat_id, "❌ پیامی برای پیش‌نمایش وجود ندارد."
+        )
+        return
+
+    await context.bot.send_message(
+        chat_id,
+        f"📨 پیش‌نمایش پست «{post['post_name']}» — {len(messages)} پیام:",
+    )
+    failed = 0
+    for post_msg in messages:
+        try:
+            await context.bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=post_msg["chat_id"],
+                message_id=post_msg["message_id"],
+            )
+        except TelegramError as err:
+            failed += 1
+            logger.error(
+                "کپی پیام پست %s msg=%s ناموفق: %s",
+                post_id,
+                post_msg["message_id"],
+                err,
+            )
+    if failed:
+        await context.bot.send_message(
+            chat_id,
+            f"⚠️ {failed} پیام کپی نشد (احتمالاً پیام اصلی پاک شده است).",
+        )
+
+
+@admin_only
+async def receive_post_rename(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    """B4: دریافت نام جدید پست (state = POST_MANAGE_EDIT)."""
+    chat_id = update.message.chat_id
+    text = (update.message.text or "").strip()
+    manage = context.user_data.get("post_manage", {})
+    post_id = manage.get("rename_post_id")
+
+    if not post_id:
+        await update.message.reply_text("❌ اطلاعات تغییر نام نامعتبر است.")
+        await show_post_list(chat_id, context, manage.get("page", 0))
+        return POST_MANAGE_LIST
+
+    if text in ("/cancel", "لغو"):
+        manage.pop("rename_post_id", None)
+        context.user_data["post_manage"] = manage
+        await update.message.reply_text("❌ تغییر نام لغو شد.")
+        await show_post_detail(chat_id, context, post_id)
+        return POST_MANAGE_DETAIL
+
+    if not text:
+        await update.message.reply_text(
+            "⚠️ نام نمی‌تواند خالی باشد — دوباره وارد کن."
+        )
+        return POST_MANAGE_EDIT
+
+    if not db.rename_post(post_id, text):
+        await update.message.reply_text("❌ پست پیدا نشد.")
+        manage.pop("rename_post_id", None)
+        context.user_data["post_manage"] = manage
+        await show_post_list(chat_id, context, manage.get("page", 0))
+        return POST_MANAGE_LIST
+
+    manage.pop("rename_post_id", None)
+    context.user_data["post_manage"] = manage
+    await update.message.reply_text(f"✅ نام پست به «{text}» تغییر یافت.")
+    await show_post_detail(chat_id, context, post_id)
+    return POST_MANAGE_DETAIL
+
+
 @admin_only
 async def handle_post_manage_callback(
     update: Update,
@@ -318,19 +413,33 @@ async def handle_post_manage_callback(
     await query.answer()
 
     chat_id = query.message.chat_id
+    message_id = query.message.message_id
     data = query.data
     manage = context.user_data.get("post_manage", {})
 
     if data == "pm_back_menu":
-        await query.edit_message_text("✅ به منوی پست‌ها برگشتید.")
+        # B9: خروج به منوی اصلی (منوی میانی پست‌ها حذف شد)
+        await query.edit_message_text("✅ به منوی اصلی بازگشتید.")
+        await go_to_main_menu(context, chat_id)
+        return ConversationHandler.END
+
+    if data == "pm_upload_new":
+        # B9: آپلود پست جدید از داخل لیست
+        context.user_data["post_upload"] = {"messages": []}
         await context.bot.send_message(
             chat_id,
-            "📝 بخش پست‌ها:",
-            reply_markup=POST_MENU_MARKUP,
+            "📝 نام پست را وارد کن:",
+            reply_markup=POST_CANCEL_MENU,
         )
-        return POST_MENU
+        return POST_UPLOAD_NAME
 
     if data in ("pm_back_list", "pm_refresh"):
+        # رفع باگ: پیام فعلی (جزئیات) درجا به لیست تبدیل می‌شود؛
+        # ویرایش پیام لیستِ قدیمی با محتوای یکسان «not modified»
+        # می‌خورد و برای کاربر نامرئی بود.
+        manage["list_message_id"] = message_id
+        manage.pop("detail_message_id", None)
+        context.user_data["post_manage"] = manage
         await show_post_list(chat_id, context, manage.get("page", 0))
         return POST_MANAGE_LIST
 
@@ -341,6 +450,9 @@ async def handle_post_manage_callback(
 
     if data.startswith("pm_view:"):
         post_id = data.split(":", 1)[1]
+        # رفع باگ: جزئیات درجا جای پیام لیست باز می‌شود (تک‌پیامی)
+        manage["detail_message_id"] = message_id
+        context.user_data["post_manage"] = manage
         await show_post_detail(chat_id, context, post_id)
         return POST_MANAGE_DETAIL
 
@@ -353,15 +465,37 @@ async def handle_post_manage_callback(
         await show_post_detail(chat_id, context, post_id)
         return POST_MANAGE_DETAIL
 
+    if data.startswith("pm_rename:"):
+        # B4: تغییر نام پست
+        post_id = data.split(":", 1)[1]
+        post = db.get_post(post_id)
+        if not post:
+            await query.answer("❌ پست پیدا نشد.")
+            await show_post_list(chat_id, context, manage.get("page", 0))
+            return POST_MANAGE_LIST
+        manage["rename_post_id"] = post_id
+        context.user_data["post_manage"] = manage
+        await query.edit_message_text(
+            f"✏️ نام فعلی پست: {post['post_name']}\n\n"
+            "نام جدید را وارد کن (برای لغو /cancel را تایپ کن):"
+        )
+        return POST_MANAGE_EDIT
+
+    if data.startswith("pm_preview:"):
+        # B4: پیش‌نمایش — پیام‌های پست در همین چت کپی می‌شوند
+        post_id = data.split(":", 1)[1]
+        await preview_post(chat_id, context, post_id)
+        return POST_MANAGE_DETAIL
+
     if data.startswith("pm_delete:"):
         post_id = data.split(":", 1)[1]
         keyboard = [
             [
-                InlineKeyboardButton(
+                ib(
                     "✅ بله، حذف کن",
                     callback_data=f"pm_confirm_delete:{post_id}",
                 ),
-                InlineKeyboardButton(
+                ib(
                     "❌ خیر", callback_data=f"pm_view:{post_id}"),
             ]
         ]

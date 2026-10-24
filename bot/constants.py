@@ -34,7 +34,7 @@
 
 
 (
-    ONGOING_MENU,
+    ONGOING_MENU,  # B5: منوی میانی حذف شد — مقدار فقط برای حفظ شماره‌ها می‌ماند
     ONGOING_LIST,
     ONGOING_CREATE_NAME,
     ONGOING_CREATE_SEASON,
@@ -61,7 +61,7 @@
 
 
 (
-    POST_MENU,
+    POST_MENU,  # B9: منوی میانی پست‌ها حذف شد — مقدار فقط برای حفظ شماره‌ها می‌ماند
     POST_UPLOAD_NAME,
     POST_UPLOAD_MESSAGES,
     POST_MANAGE_LIST,
@@ -102,6 +102,8 @@ MANAGE_QUALITIES = 48
 
 # R8+: گزارش خرابی لینک — دریافت توضیحات از کاربر (state 57)
 WAIT_REPORT_TEXT = 57
+# B4: انتظار متن «نام جدید پست» در مدیریت پست‌ها
+POST_MANAGE_EDIT = 58
 
 
 # دکمه ورود به پنل در منوی اصلی (فقط مالک) — باید با متن دکمه یکی باشد
@@ -187,10 +189,15 @@ class Msg:
     UPLOAD_CANCELLED_INLINE = "❌ آپلود لغو شد."
     UPLOAD_SAVED = "✅ آپلود با موفقیت ثبت شد."
     SAVE_ERROR = "❌ خطایی رخ داد. لطفاً دوباره تلاش کن."
-    REPORT_SAVED = "✅ گزارش شما با موفقیت ثبت شد.\n"
+    REPORT_SAVED = "✅ گزارش شما با موفقیت ثبت شد."
     LINK_NOT_FOUND = "❌ لینک پیدا نشد!"
     INVALID_COMMAND = "⚠️ دستور نامعتبر!"
 
+    # P14: پیش‌چک دسترسی ربات به کانال منبع
+    CHANNEL_UNREACHABLE = (
+        "⚠️ ربات در حال حاضر به کانال ذخیرهٔ فایل‌ها دسترسی ندارد. "
+        "موضوع به مدیر گزارش شد."
+    )
     NO_STORAGE_CHANNEL = (
         "❌ کانال ذخیره‌سازی برای این لینک مشخص نیست."
     )

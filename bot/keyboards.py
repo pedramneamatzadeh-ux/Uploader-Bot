@@ -112,20 +112,8 @@ ANIME_TYPE_MENU = ReplyKeyboardMarkup(
 )
 
 
-ONGOING_MENU_MARKUP = ReplyKeyboardMarkup(
-    [
-        ["آپلود قسمت جدید", "مدیریت انیمه‌ها"],
-        ["بازگشت به منوی اصلی"],
-    ],
-    resize_keyboard=True,
-)
-
-
 ONGOING_CANCEL_MENU = ReplyKeyboardMarkup(
-    [
-        ["لغو"],
-        ["بازگشت به منوی اصلی"],
-    ],
+    [[KeyboardButton("لغو", style="danger")]],
     resize_keyboard=True,
 )
 
@@ -141,40 +129,30 @@ PART_NUM_MENU = ReplyKeyboardMarkup(
 
 ONGOING_PART_MENU = ReplyKeyboardMarkup(
     [
-        ["ندارد ➖"],
-        ["لغو"],
-        ["بازگشت به منوی اصلی"],
+        [KeyboardButton("ندارد ➖", style="primary")],
+        [KeyboardButton("لغو", style="danger")],
     ],
     resize_keyboard=True,
 )
 
 
 BROADCAST_CANCEL_MENU = ReplyKeyboardMarkup(
-    [["لغو"]],
-    resize_keyboard=True,
-)
-
-
-POST_MENU_MARKUP = ReplyKeyboardMarkup(
-    [
-        ["📤 آپلود پست", "📋 مدیریت پست‌ها"],
-        ["بازگشت به منوی اصلی"],
-    ],
+    [[KeyboardButton("لغو", style="danger")]],
     resize_keyboard=True,
 )
 
 
 POST_UPLOAD_CANCEL_MENU = ReplyKeyboardMarkup(
     [
-        ["✅ تمام شد"],
-        ["لغو"],
+        [KeyboardButton("✅ تمام شد", style="success")],
+        [KeyboardButton("لغو", style="danger")],
     ],
     resize_keyboard=True,
 )
 
 
 POST_CANCEL_MENU = ReplyKeyboardMarkup(
-    [["لغو"]],
+    [[KeyboardButton("لغو", style="danger")]],
     resize_keyboard=True,
 )
 

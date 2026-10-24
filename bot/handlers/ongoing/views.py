@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import Any, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ...config import config
@@ -17,7 +17,6 @@ from ...constants import (
     ONGOING_EDIT,
     ONGOING_FIELD_MAP,
     ONGOING_LIST,
-    ONGOING_MENU,
     ONGOING_UPLOAD_CONFIRM,
     ONGOING_UPLOAD_DB_SELECT,
     ONGOING_UPLOAD_EPISODE,
@@ -34,9 +33,9 @@ from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
     ONGOING_CANCEL_MENU,
-    ONGOING_MENU_MARKUP,
     ONGOING_PART_MENU,
     build_pagination_row,
+    ib,
     main_menu_for,
     quality_keyboard,
 )
@@ -44,7 +43,7 @@ from ...utils import (
     build_download_link,
     fmt_tehran,
     get_default_channel_chat_id,
-    go_to_ongoing_menu,
+    go_to_ongoing_list,
     normalize_optional_text,
     safe_edit_or_send,
     total_pages,
@@ -68,8 +67,8 @@ async def show_ongoing_anime_list(
     if not items:
         text = "📋 لیست انیمه‌های درحال پخش:\n\nهنوز انیمه‌ای ثبت نشده است."
         keyboard = [
-            [InlineKeyboardButton("➕ افزودن انیمه", callback_data="og_add")],
-            [InlineKeyboardButton("🏠 بازگشت", callback_data="og_back_menu")],
+            [ib("➕ افزودن انیمه", "success", callback_data="og_add")],
+            [ib("🏠 منوی اصلی", "danger", callback_data="og_back_menu")],
         ]
     else:
         lines = ["📋 لیست انیمه‌های درحال پخش:\n"]
@@ -87,10 +86,7 @@ async def show_ongoing_anime_list(
                 short = short[:17] + "..."
             keyboard.append(
                 [
-                    InlineKeyboardButton(
-                        f"{idx}. {short}",
-                        callback_data=f"og_view:{item['id']}",
-                    )
+                    ib(f"{idx}. {short}", "primary", callback_data=f"og_view:{item['id']}")
                 ]
             )
 
@@ -109,13 +105,12 @@ async def show_ongoing_anime_list(
 
         keyboard.append(
             [
-                InlineKeyboardButton("➕ افزودن انیمه", callback_data="og_add"),
-                InlineKeyboardButton(
-                    "📤 آپلود قسمت", callback_data="og_to_upload"),
+                ib("➕ افزودن انیمه", "success", callback_data="og_add"),
+                ib("📤 آپلود قسمت", "success", callback_data="og_to_upload"),
             ]
         )
         keyboard.append(
-            [InlineKeyboardButton("🏠 بازگشت", callback_data="og_back_menu")]
+            [ib("🏠 منوی اصلی", "danger", callback_data="og_back_menu")]
         )
 
     msg_id = manage.get("list_message_id")
@@ -168,43 +163,30 @@ async def show_ongoing_anime_detail(
 
     if is_finished:
         finish_row = [
-            InlineKeyboardButton(
-                "↩️ بازگشت به درحال پخش",
-                callback_data=f"og_unfinish:{anime_id}",
-            )
+            ib("↩️ بازگشت به درحال پخش", "danger", callback_data=f"og_unfinish:{anime_id}")
         ]
     else:
         finish_row = [
-            InlineKeyboardButton(
-                "🏁 اتمام پخش این انیمه",
-                callback_data=f"og_finish:{anime_id}",
-            )
+            ib("🏁 اتمام پخش این انیمه", "success", callback_data=f"og_finish:{anime_id}")
         ]
 
     keyboard = [
         [
-            InlineKeyboardButton(
-                "✏️ ویرایش نام", callback_data=f"og_edit:name:{anime_id}"),
-            InlineKeyboardButton(
-                "🔢 ویرایش فصل", callback_data=f"og_edit:season:{anime_id}"),
+            ib("✏️ ویرایش نام", "success", callback_data=f"og_edit:name:{anime_id}"),
+            ib("🔢 ویرایش فصل", "success", callback_data=f"og_edit:season:{anime_id}"),
         ],
         [
-            InlineKeyboardButton(
-                "📦 ویرایش پارت", callback_data=f"og_edit:part:{anime_id}"),
-            InlineKeyboardButton(
-                "📤 آپلود قسمت", callback_data=f"og_upload_for:{anime_id}"),
+            ib("📦 ویرایش پارت", "success", callback_data=f"og_edit:part:{anime_id}"),
+            ib("📤 آپلود قسمت", "success", callback_data=f"og_upload_for:{anime_id}"),
         ],
         [
-            InlineKeyboardButton(
-                toggle_label, callback_data=f"og_toggle:{anime_id}"),
-            InlineKeyboardButton(
-                "🗑️ حذف", callback_data=f"og_delete:{anime_id}"),
+            ib(toggle_label, "success", callback_data=f"og_toggle:{anime_id}"),
+            ib("🗑️ حذف", "danger", callback_data=f"og_delete:{anime_id}"),
         ],
         finish_row,
         [
-            InlineKeyboardButton("📋 بازگشت به لیست",
-                                 callback_data="og_back_list"),
-            InlineKeyboardButton("🏠 منو", callback_data="og_back_menu"),
+            ib("📋 بازگشت به لیست", "danger", callback_data="og_back_list"),
+            ib("🏠 منوی اصلی", "danger", callback_data="og_back_menu"),
         ],
     ]
 

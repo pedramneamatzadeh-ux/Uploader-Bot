@@ -71,7 +71,7 @@ def _manage(context: ContextTypes.DEFAULT_TYPE) -> dict:
     manage.setdefault("page", 0)
     manage.setdefault("mode", "list")
     manage.setdefault("search_term", None)
-    manage.setdefault("sort", "alpha")
+    manage.setdefault("sort", "new")  # B3: پیش‌فرض = جدیدترین
     manage.setdefault("level", 1)
     return manage
 

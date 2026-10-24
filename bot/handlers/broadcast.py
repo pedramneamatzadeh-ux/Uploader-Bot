@@ -1,14 +1,14 @@
 import asyncio
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import TelegramError
+from telegram import InlineKeyboardMarkup, Update
+from telegram.error import RetryAfter, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ..constants import BROADCAST_CONFIRM, BROADCAST_INPUT
 from ..database import db
 from ..decorators import admin_only
-from ..keyboards import BROADCAST_CANCEL_MENU, main_menu_for
+from ..keyboards import BROADCAST_CANCEL_MENU, ib, main_menu_for
 from ..utils import go_to_main_menu
 
 
@@ -62,9 +62,8 @@ async def receive_broadcast_message(
 
     keyboard = [
         [
-            InlineKeyboardButton(
-                "✅ تایید و ارسال", callback_data="bc_confirm"),
-            InlineKeyboardButton("❌ لغو", callback_data="bc_cancel"),
+            ib("✅ تایید و ارسال", callback_data="bc_confirm"),
+            ib("❌ لغو", callback_data="bc_cancel"),
         ]
     ]
     await update.message.reply_text(
@@ -107,16 +106,29 @@ async def confirm_broadcast(
     failed = 0
 
     for uid in user_ids:
-        try:
-            await context.bot.copy_message(
-                chat_id=uid,
-                from_chat_id=broadcast["chat_id"],
-                message_id=broadcast["message_id"],
-            )
-            success += 1
-        except TelegramError as err:
-            logger.warning("Broadcast failed for user %s: %s", uid, err)
-            failed += 1
+        # P10: در صورت محدودیت نرخ (RetryAfter) صبر کن و یک‌بار تلاش مجدد
+        for attempt in (1, 2):
+            try:
+                await context.bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=broadcast["chat_id"],
+                    message_id=broadcast["message_id"],
+                )
+                success += 1
+                break
+            except RetryAfter as err:
+                if attempt == 2:
+                    logger.warning("RetryAfter برای کاربر %s کافی نبود", uid)
+                    failed += 1
+                    break
+                logger.warning(
+                    "RetryAfter %ss برای کاربر %s", err.retry_after, uid
+                )
+                await asyncio.sleep(err.retry_after + 0.1)
+            except TelegramError as err:
+                logger.warning("Broadcast failed for user %s: %s", uid, err)
+                failed += 1
+                break
         if (success + failed) % 30 == 0:
             await asyncio.sleep(1)
 
