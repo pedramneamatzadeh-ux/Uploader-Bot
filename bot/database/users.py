@@ -210,6 +210,89 @@ class UsersMixin:
                 "SELECT COUNT(*) FROM downloads"
             ).fetchone()[0]
 
+    def get_period_stats(
+        self,
+        start: str,
+        end: Optional[str] = None,
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """R8d — آمار دانلودها در بازهٔ [start, end) (رشته‌های UTC).
+
+        ``end=None`` ⇒ تا همین لحظه. خروجی:
+        - total: کل دانلودها (بدون JOIN ⇒ دانلودهای لینک حذف‌شده هم شمرده می‌شوند)
+        - users: کاربران یکتا
+        - groups: فصل/پارت یکتا (نام، نوع، فصل، پارت) — با JOIN روی uploads
+        - top: لیست پرطرفدارها (گروه‌بندی مثل R8b، مرتب 👥 سپس 📥)
+        """
+        where_plain = "downloaded_at >= ?"
+        where_join = "downloads.downloaded_at >= ?"
+        params: List[Any] = [start]
+        if end is not None:
+            where_plain += " AND downloaded_at < ?"
+            where_join += " AND downloads.downloaded_at < ?"
+            params.append(end)
+
+        with self.connect() as connection:
+            summary = connection.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(DISTINCT user_id) AS users
+                FROM downloads
+                WHERE {where_plain}
+                """,
+                params,
+            ).fetchone()
+
+            groups_row = connection.execute(
+                f"""
+                SELECT COUNT(*) FROM (
+                    SELECT 1
+                    FROM downloads
+                    JOIN uploads
+                        ON downloads.session_id = uploads.session_id
+                    WHERE {where_join}
+                    GROUP BY
+                        uploads.anime_name,
+                        COALESCE(uploads.anime_type, ''),
+                        COALESCE(uploads.season_num, ''),
+                        COALESCE(uploads.part_num, '')
+                )
+                """,
+                params,
+            ).fetchone()
+
+            top = connection.execute(
+                f"""
+                SELECT
+                    uploads.anime_name,
+                    COALESCE(uploads.anime_type, '') AS anime_type,
+                    COALESCE(uploads.season_num, '') AS season_num,
+                    COALESCE(uploads.part_num, '') AS part_num,
+                    COUNT(DISTINCT downloads.user_id) AS users_count,
+                    COUNT(downloads.id) AS total_count
+                FROM downloads
+                JOIN uploads
+                    ON downloads.session_id = uploads.session_id
+                WHERE {where_join}
+                GROUP BY
+                    uploads.anime_name,
+                    anime_type,
+                    season_num,
+                    part_num
+                ORDER BY users_count DESC, total_count DESC
+                LIMIT ?
+                """,
+                params + [limit],
+            ).fetchall()
+
+        return {
+            "total": summary[0] if summary else 0,
+            "users": summary[1] if summary else 0,
+            "groups": groups_row[0] if groups_row else 0,
+            "top": [dict(row) for row in top],
+        }
+
     # ------------------------------------------------------------------
     # Reports
     # ------------------------------------------------------------------

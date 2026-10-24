@@ -14,6 +14,7 @@ from ..utils import (
     fmt_tehran,
     format_anime_title,
     go_to_main_menu,
+    period_boundaries,
     safe_edit_or_send,
     total_pages,
 )
@@ -44,6 +45,8 @@ async def show_stats_menu(
         [InlineKeyboardButton("👥 کاربران ربات", callback_data="stats_users")],
         [InlineKeyboardButton("🏆 انیمه‌های پرطرفدار",
                               callback_data="stats_top_anime")],
+        [InlineKeyboardButton("📅 آمار دوره‌ای",
+                              callback_data="stats_periods")],
         [InlineKeyboardButton("🔴 گزارش‌های خرابی",
                               callback_data="stats_reports")],
         [InlineKeyboardButton("🏠 بازگشت به منوی اصلی",
@@ -196,6 +199,107 @@ async def show_top_anime_stats(
         keyboard.append(nav)
     keyboard.append([InlineKeyboardButton(
         "🔙 بازگشت", callback_data="stats_back")])
+
+    await safe_edit_or_send(
+        context,
+        chat_id,
+        "\n".join(lines),
+        InlineKeyboardMarkup(keyboard),
+        message_id,
+        parse_mode="Markdown",
+    )
+
+
+async def show_periods_menu(
+    chat_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    message_id: int = None,
+) -> None:
+    """R8d — صفحهٔ انتخاب دورهٔ آمار (تقویم شمسی، به وقت تهران)."""
+    text = (
+        "📅 **آمار دوره‌ای**\n\n"
+        "دوره را انتخاب کنید (مرزها بر مبنای تقویم شمسی و وقت تهران):"
+    )
+    keyboard = [
+        [InlineKeyboardButton("📅 هفتگی (از شنبهٔ این هفته)",
+                              callback_data="stats_period:w")],
+        [InlineKeyboardButton("📆 ماهانه (از ۱م ماه جاری)",
+                              callback_data="stats_period:m")],
+        [InlineKeyboardButton("🗓 سالانه (از ۱ فروردین)",
+                              callback_data="stats_period:y")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="stats_back")],
+    ]
+    await safe_edit_or_send(
+        context,
+        chat_id,
+        text,
+        InlineKeyboardMarkup(keyboard),
+        message_id,
+        parse_mode="Markdown",
+    )
+
+
+async def show_period_stats(
+    chat_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+    period: str,
+    message_id: int = None,
+) -> None:
+    """R8d — کارت آمار یک دوره: خلاصه + مقایسه با دورهٔ قبل + ۱۰ پرطرفدار."""
+    bounds = period_boundaries(period)
+    current = db.get_period_stats(bounds["start"])
+    previous = db.get_period_stats(
+        bounds["prev_start"], end=bounds["prev_end"]
+    )
+
+    def _signed(value: int) -> str:
+        return f"+{value}" if value > 0 else str(value)
+
+    d_total = current["total"] - previous["total"]
+    d_users = current["users"] - previous["users"]
+
+    lines = [
+        f"📅 **آمار {bounds['title']}**\n",
+        f"🗓 {bounds['label']} — به وقت تهران",
+        "─" * 25,
+        f"📥 کل دانلودها: {current['total']}",
+        f"👥 کاربران یکتا: {current['users']}",
+        f"🎬 فصل/پارت یکتا: {current['groups']}",
+        (
+            f"📈 نسبت به دورهٔ قبل ({bounds['prev_label']}):"
+            f" 📥 {_signed(d_total)} | 👥 {_signed(d_users)}\n"
+        ),
+        "─" * 25 + "\n",
+        "🏆 **۱۰ پرطرفدار دوره:**\n",
+    ]
+
+    if not current["top"]:
+        lines.append("در این دوره دانلودی ثبت نشده است.")
+    else:
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for idx, anime in enumerate(current["top"], start=1):
+            medal = medals.get(idx, f"{idx}.")
+            title = format_anime_title(
+                anime["anime_name"],
+                anime.get("season_num"),
+                anime.get("part_num"),
+                anime.get("anime_type"),
+                display=db.get_display_for(
+                    anime["anime_name"],
+                    anime.get("season_num"),
+                    anime.get("part_num"),
+                ),
+            )
+            lines.append(f"{medal} **{title}**")
+            lines.append(
+                f"   👥 {anime['users_count']} نفر"
+                f" | 📥 {anime['total_count']} بار\n"
+            )
+
+    keyboard = [
+        [InlineKeyboardButton(
+            "🔙 بازگشت", callback_data="stats_periods")],
+    ]
 
     await safe_edit_or_send(
         context,
@@ -508,6 +612,15 @@ async def handle_stats_callback(
         await show_top_anime_stats(
             chat_id, context, int(data.split(":")[1]), message_id
         )
+    elif data == "stats_periods":
+        await show_periods_menu(chat_id, context, message_id)
+    elif data.startswith("stats_period:"):
+        # R8d — کارت آمار دورهٔ شمسی (هفتگی/ماهانه/سالانه)
+        period = data.split(":", 1)[1]
+        if period in ("w", "m", "y"):
+            await show_period_stats(chat_id, context, period, message_id)
+        else:
+            await show_periods_menu(chat_id, context, message_id)
     elif data == "stats_reports":
         await show_reports_stats(chat_id, context, 0, message_id)
     elif data.startswith("stats_reports_page:"):

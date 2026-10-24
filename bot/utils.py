@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 from zoneinfo import ZoneInfo
 
@@ -274,6 +274,139 @@ def fmt_tehran(value: Any) -> str:
         f"{jy:04d}/{jm:02d}/{jd:02d} — "
         f"{local.hour:02d}:{local.minute:02d}"
     )
+
+
+# ---------------------------------------------------------------------------
+# R8d — آمار دوره‌ای (هفتگی/ماهانه/سالانه بر مبنای تقویم شمسی، وقت تهران)
+# ---------------------------------------------------------------------------
+
+JALALI_MONTH_NAMES = (
+    "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+    "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
+)
+
+PERIOD_TITLES = {"w": "هفتگی", "m": "ماهانه", "y": "سالانه"}
+
+
+def _jalali_to_gregorian(jy: int, jm: int, jd: int) -> Tuple[int, int, int]:
+    """تبدیل تاریخ شمسی به میلادی (معکوس _gregorian_to_jalali، بدون dependency)."""
+    jy += 1595
+    days = (
+        -355668
+        + 365 * jy
+        + (jy // 33) * 8
+        + ((jy % 33) + 3) // 4
+        + jd
+    )
+    if jm < 7:
+        days += (jm - 1) * 31
+    else:
+        days += (jm - 7) * 30 + 186
+
+    gy = 400 * (days // 146097)
+    days %= 146097
+    if days > 36524:
+        days -= 1
+        gy += 100 * (days // 36524)
+        days %= 36524
+        if days >= 365:
+            days += 1
+
+    gy += 4 * (days // 1461)
+    days %= 1461
+    if days > 365:
+        gy += (days - 1) // 365
+        days = (days - 1) % 365
+
+    gd = days + 1
+    leap = (gy % 4 == 0 and gy % 100 != 0) or (gy % 400 == 0)
+    sal_a = (
+        0, 31, 29 if leap else 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31,
+    )
+    gm = 0
+    for gm in range(1, 13):
+        if gd <= sal_a[gm]:
+            break
+        gd -= sal_a[gm]
+    return gy, gm, gd
+
+
+def _tehran_midnight_to_utc(jy: int, jm: int, jd: int) -> str:
+    """نیمه‌شب تهرانِ یک تاریخ شمسی ⇒ رشته UTC برای مقایسه با downloaded_at."""
+    gy, gm, gd = _jalali_to_gregorian(jy, jm, jd)
+    local = datetime(gy, gm, gd, 0, 0, 0, tzinfo=_TEHRAN_TZ)
+    return local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _local_to_utc_str(local_dt: datetime) -> str:
+    return local_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def period_boundaries(
+    period: str,
+    now: Optional[datetime] = None,
+) -> Dict[str, str]:
+    """R8d — مرزهای دورهٔ شمسی جاری و دورهٔ قبل (رشته UTC برای SQL).
+
+    - ``w``: از شنبهٔ این هفته (نیمه‌شب تهران)؛ قبل = شنبهٔ هفتهٔ قبل
+    - ``m``: از ۱م ماه شمسی جاری؛ قبل = ماه شمسی قبل
+    - ``y``: از ۱ فروردین سال جاری؛ قبل = سال شمسی قبل
+
+    خروجی: start / prev_start / prev_end (= start، پایان نیمه‌باز دورهٔ قبل)
+    و label/prev_label/title فارسی. ``now`` فقط برای تست تزریق می‌شود.
+    """
+    if period not in PERIOD_TITLES:
+        raise ValueError(f"دورهٔ نامعتبر: {period}")
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local = now.astimezone(_TEHRAN_TZ)
+    jy, jm, jd = _gregorian_to_jalali(local.year, local.month, local.day)
+
+    if period == "w":
+        # شنبه = weekday 5 در پایتون؛ فاصلهٔ امروز تا شنبهٔ جاری
+        days_since_saturday = (local.weekday() - 5) % 7
+        start_local = (local - timedelta(days=days_since_saturday)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        prev_start_local = start_local - timedelta(days=7)
+        sy, sm_, sd = _gregorian_to_jalali(
+            start_local.year, start_local.month, start_local.day
+        )
+        py, pm, pd = _gregorian_to_jalali(
+            prev_start_local.year, prev_start_local.month, prev_start_local.day
+        )
+        label = f"از شنبه {sy:04d}/{sm_:02d}/{sd:02d}"
+        prev_label = f"شنبه {py:04d}/{pm:02d}/{pd:02d}"
+        start = _local_to_utc_str(start_local)
+        prev_start = _local_to_utc_str(prev_start_local)
+    elif period == "m":
+        if jm == 1:
+            pjy, pjm = jy - 1, 12
+        else:
+            pjy, pjm = jy, jm - 1
+        label = f"از 1 {JALALI_MONTH_NAMES[jm - 1]} {jy:04d}"
+        prev_label = f"{JALALI_MONTH_NAMES[pjm - 1]} {pjy:04d}"
+        start = _tehran_midnight_to_utc(jy, jm, 1)
+        prev_start = _tehran_midnight_to_utc(pjy, pjm, 1)
+    else:  # "y"
+        label = f"از 1 فروردین {jy:04d}"
+        prev_label = f"سال {jy - 1:04d}"
+        start = _tehran_midnight_to_utc(jy, 1, 1)
+        prev_start = _tehran_midnight_to_utc(jy - 1, 1, 1)
+
+    return {
+        "period": period,
+        "title": PERIOD_TITLES[period],
+        "start": start,
+        "prev_start": prev_start,
+        "prev_end": start,
+        "label": label,
+        "prev_label": prev_label,
+    }
 
 
 async def _delete_messages_after_delay(
