@@ -79,6 +79,13 @@ async def show_group_list(
     if not groups:
         text = title + "چیزی یافت نشد. 😕"
     else:
+        # R12-2: اگر گروه چند نام واقعی دارد، نام واقعی هر عضو
+        # قبل از برچسب فصل/پارت نوشته می‌شود.
+        distinct_names = {
+            group.get("anime_name") for group in groups
+        }
+        multi_name = len(distinct_names) > 1
+
         lines = []
         for idx, group in enumerate(groups):
             label = _group_label(
@@ -86,6 +93,8 @@ async def show_group_list(
                 group.get("part_num") or "",
                 bool(group.get("is_cinema")),
             )
+            if multi_name and group.get("anime_name"):
+                label = f"{group['anime_name']} — {label}"
             lines.append(
                 f"{idx + 1}. {label} ({group.get('links', 0)} لینک)"
             )

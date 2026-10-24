@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardMarkup, Update
@@ -303,11 +303,12 @@ def schedule_delete(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     message_ids: List[int],
-) -> None:
+) -> Optional[Any]:
+    """حذف پیام‌ها با تأخیر؛ task برگردانده می‌شود تا قابل لغو باشد (R8e)."""
     if not message_ids:
-        return
+        return None
 
-    context.application.create_task(
+    return context.application.create_task(
         _delete_messages_after_delay(
             bot=context.bot,
             chat_id=chat_id,
@@ -315,6 +316,37 @@ def schedule_delete(
             delay=config.DELETE_AFTER_SECONDS,
         ),
     )
+
+
+def format_anime_title(
+    anime_name: str,
+    season_num: Optional[str] = None,
+    part_num: Optional[str] = None,
+    anime_type: Optional[str] = None,
+    display: Optional[str] = None,
+) -> str:
+    """R8+/R12: عنوان یکدست برای آمار.
+
+    سریالی: «نام» S2 P1 — فصل آزاد: «نام» (OVA)
+    سینمایی: «نام» (سینمایی شماره 2)
+    نام ظاهری مؤثر (display — از db.get_display_for) بر نام واقعی
+    اولویت دارد.
+    """
+    name = display or anime_name
+    season = str(season_num or "").strip()
+    part = str(part_num or "").strip()
+
+    if (anime_type or "").strip() == "سینمایی":
+        if season:
+            return f"«{name}» (سینمایی شماره {season})"
+        return f"«{name}» (سینمایی)"
+
+    title = f"«{name}»"
+    if season:
+        title += f" S{season}" if season.isdigit() else f" ({season})"
+    if part and part != "ندارد":
+        title += f" P{part}" if part.isdigit() else f" ({part})"
+    return title
 
 
 def track_user(update: Update) -> None:

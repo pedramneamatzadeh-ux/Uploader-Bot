@@ -139,7 +139,6 @@ async def deliver_files_for_session(
             final_text,
             reply_markup=report_kb,
         )
-        sent_message_ids.append(final_msg.message_id)
 
         info_msg = await message.reply_text(
             f"🗑️ این پیام‌ها پس از {config.DELETE_AFTER_SECONDS} ثانیه به طور خودکار حذف خواهند شد."
@@ -147,6 +146,21 @@ async def deliver_files_for_session(
         sent_message_ids.append(info_msg.message_id)
 
         schedule_delete(context, chat.id, sent_message_ids)
+
+        # R8e: پیامِ حامل دکمه «🔴 گزارش خرابی فایل‌ها» task حذف
+        # *لغوپذیر* جداگانه می‌گیرد — اگر کاربر پیش از حذف دکمه را
+        # بزند، task در base.py لغو می‌شود و پیام تا پایان دریافت
+        # توضیحات باقی می‌ماند؛ در غیر این صورت همراه فایل‌ها حذف می‌شود.
+        keep_task = schedule_delete(
+            context,
+            chat.id,
+            [final_msg.message_id],
+        )
+        if keep_task is not None:
+            context.chat_data.setdefault(
+                "report_del_tasks",
+                {},
+            )[final_msg.message_id] = keep_task
 
     if failed_ids:
         await message.reply_text(
@@ -290,7 +304,8 @@ async def deliver_summary_for_session(
     # قالب ارسال (به جای متن خام): عنوان + برچسب + متن
     anime_name = summary.get("anime_name") or ""
     season_num = summary.get("season_num") or ""
-    display = db.get_display_map().get(anime_name) or anime_name
+    # R12: نام ظاهری مؤثر در سطح فصل (خلاصه‌ها پارت ندارند)
+    display = db.get_display_for(anime_name, season_num)
     if db.is_cinema_name(anime_name):
         title = f"Movie: {display} {season_num}".rstrip()
     else:

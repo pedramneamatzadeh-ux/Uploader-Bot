@@ -45,7 +45,14 @@ from ...utils import (
     validate_episode_input,
 )
 
-from .common import SORT_MODES, _episode_sort_key, _level_state, _manage
+from .common import (
+    SORT_MODES,
+    _episode_sort_key,
+    _group_label,
+    _level_state,
+    _manage,
+    _recalc_manage_group,
+)
 from .detail import show_link_detail
 from .episodes import show_episode_list
 from .groups import show_group_list
@@ -75,6 +82,21 @@ async def handle_management_callback(
             logger.debug(
                 "answerCallbackQuery ناموفق بود", exc_info=True
             )
+
+
+def _alias_reset_keyboard(
+    reset_callback: str,
+    back_callback: str,
+) -> InlineKeyboardMarkup:
+    """R12-2: ریست به نام واقعی + بازگشت (زیر پرامپت‌های نام ظاهری)."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                ib("↩️ ریست به نام واقعی", callback_data=reset_callback)
+            ],
+            [ib("◀️ بازگشت", callback_data=back_callback)],
+        ]
+    )
 
 
 async def _dispatch_management(
@@ -167,7 +189,8 @@ async def _dispatch_management(
         manage["names"] = names
         manage["name"] = names[0] if names else ""
         manage["is_cinema"] = bool(item.get("cinema"))
-        manage["l2"] = db.get_combined_groups(names)
+        # R12-2: ردیف‌های سطح ۲ = اعضای (نام، نوع، فصل، پارت) خود گروه
+        manage["l2"] = item.get("members") or db.get_combined_groups(names)
         for key in ("season", "part", "episode", "l3", "l4"):
             manage.pop(key, None)
         context.user_data["manage"] = manage
@@ -343,17 +366,36 @@ async def _dispatch_management(
         return MANAGE_SEARCH
 
     if data == "rename_display":
-        current = manage.get("display_name") or manage.get("name") or ""
-        await query.edit_message_text(
-            "✏️ تغییر نام ظاهری\n\n"
-            f"نام فعلی: {current}\n\n"
-            "نام جدید (فقط حروف انگلیسی) را وارد کن:\n"
-            "• فقط در لیست اول عوض می‌شود؛ نام لینک‌ها دست نمی‌خورد.\n"
-            "• اگر این نام را انیمه دیگری هم داشته باشد، هر دو در لیست "
-            "اول یکی می‌شوند.\n\n"
-            "برای لغو /cancel را تایپ کن."
-        )
+        # R12-2: تغییر نام ظاهری در سطح عضو (نام واقعی، فصل، پارت) —
+        # دیگر روی کل نام واقعی اثر نمی‌گذارد.
+        current_name = manage.get("name") or ""
+        season = manage.get("season") or ""
+        part = manage.get("part") or ""
+        if not current_name:
+            await query.answer(
+                "❌ ابتدا یک فصل/پارت را انتخاب کن.",
+                show_alert=True,
+            )
+            return _level_state(manage)
+
+        current_alias = db.get_display_for(current_name, season, part)
+        label = _group_label(season, part, bool(manage.get("is_cinema")))
         context.user_data["rename_waiting"] = "display"
+        context.user_data["rename_triple"] = (current_name, season, part)
+        await query.edit_message_text(
+            f"🎭 تغییر نام ظاهری — فقط برای «{current_name} {label}»\n\n"
+            f"📛 نام واقعی: {current_name}\n"
+            f"🎭 نام ظاهری فعلی: {current_alias}\n\n"
+            "نام جدید (فقط حروف انگلیسی) را وارد کن:\n"
+            "• اگر با نام ظاهری انیمه دیگری یکی شود، در لیست اول "
+            "پیش هم قرار می‌گیرند.\n"
+            "• اگر متفاوت باشد، این فصل/پارت یک انیمه جدا می‌شود.\n"
+            "• نام لینک‌ها دست نمی‌خورد.\n\n"
+            "برای لغو /cancel را تایپ کن.",
+            reply_markup=_alias_reset_keyboard(
+                "alias_reset_member", "split_cancel"
+            ),
+        )
         return MANAGE_EDIT
 
     if data == "rename_physical":
@@ -381,17 +423,30 @@ async def _dispatch_management(
         return MANAGE_EDIT
 
     if data == "split_anime":
-        members = manage.get("names") or []
+        # R12-2: جداسازی = انتخاب عضو (نام، فصل، پارت) و دادن
+        # نام ظاهری جدید به آن — دیگر برچسبی حذف نمی‌شود.
+        members = manage.get("l2") or []
         if len(members) < 2:
             await query.answer(
                 "ℹ️ این ردیف ادغام نشده است.",
                 show_alert=True,
             )
             return _level_state(manage)
-        keyboard = [
-            [ib(member, callback_data=f"split:{i}")]
-            for i, member in enumerate(members)
-        ]
+        keyboard = []
+        for i, member in enumerate(members):
+            member_label = _group_label(
+                member.get("season_num") or "",
+                member.get("part_num") or "",
+                bool(member.get("is_cinema")),
+            )
+            keyboard.append(
+                [
+                    ib(
+                        f"{member.get('anime_name')} — {member_label}",
+                        callback_data=f"split:{i}",
+                    )
+                ]
+            )
         keyboard.append(
             [
                 ib(
@@ -400,13 +455,15 @@ async def _dispatch_management(
             ]
         )
         await query.edit_message_text(
-            "✂️ جداسازی — کدام انیمه جدا شود؟\n\n"
-            "(نام واقعی هر عضو نوشته شده است)",
+            "✂️ جداسازی — کدام فصل/پارت جدا شود؟\n\n"
+            "(برای عضو انتخابی نام ظاهری جدید پرسیده می‌شود.)",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return _level_state(manage)
 
     if data == "split_cancel":
+        context.user_data.pop("rename_waiting", None)
+        context.user_data.pop("rename_triple", None)
         return await _refresh_current(chat_id, context, manage)
 
     if data.startswith("split:"):
@@ -414,27 +471,75 @@ async def _dispatch_management(
             idx = int(data.split(":", 1)[1])
         except ValueError:
             idx = -1
-        members = manage.get("names") or []
+        members = manage.get("l2") or []
         if idx < 0 or idx >= len(members):
             await query.answer("❌ گزینه نامعتبر.", show_alert=True)
             return _level_state(manage)
         member = members[idx]
-        display = manage.get("display_name") or manage.get("name") or ""
-        db.split_display_name(member, display, members)
-
-        # مرحله ۵د: هویت جدید ردیف از روی نام واقعیِ فعلی بازمحاسبه می‌شود
-        current = manage.get("name") or ""
-        new_display = db.get_display_map().get(current, current)
-        manage["display_name"] = new_display
-        manage["names"] = db.names_for_display(new_display)
-        manage["l2"] = db.get_combined_groups(manage["names"])
-        context.user_data["manage"] = manage
-
-        await query.answer(f"✅ «{member}» جدا شد.")
-        return await _refresh_current(chat_id, context, manage)
+        name = member.get("anime_name") or ""
+        season = member.get("season_num") or ""
+        part = member.get("part_num") or ""
+        current_alias = db.get_display_for(name, season, part)
+        label = _group_label(season, part, bool(member.get("is_cinema")))
+        context.user_data["rename_waiting"] = "display"
+        context.user_data["rename_triple"] = (name, season, part)
+        await query.edit_message_text(
+            f"✂️ جداسازی «{name} {label}»\n\n"
+            f"🎭 نام ظاهری فعلی: {current_alias}\n\n"
+            "نام ظاهری جدید (فقط حروف انگلیسی) را وارد کن —\n"
+            "باید با نام ظاهری گروه متفاوت باشد تا جدا شود.\n\n"
+            "برای لغو /cancel را تایپ کن.",
+            reply_markup=_alias_reset_keyboard(
+                "alias_reset_member", "split_cancel"
+            ),
+        )
+        return MANAGE_EDIT
 
     if data.startswith("view_link:"):
+        # R12-2: بازگشت از پرامپت‌ها ⇒ کلیدهای موقت ویرایش پاک شوند
+        for key in ("edit_session", "edit_field", "waiting_for_input"):
+            context.user_data.pop(key, None)
         session_id = data.split(":", 1)[1]
+        await show_link_detail(chat_id, context, session_id)
+        return MANAGE_DETAIL
+
+    if data == "alias_reset_member":
+        # R12-2: ریست نام ظاهری عضو به نام واقعی (حذف ردیف سطح فصل
+        # + برچسب پیش‌فرض کل نام) — مسیر بازگشت از ادغام قدیمی.
+        triple = context.user_data.pop("rename_triple", None)
+        context.user_data.pop("rename_waiting", None)
+        if not triple:
+            await query.answer("❌ عملیات نامعتبر.", show_alert=True)
+            return _level_state(manage)
+        name, season, part = triple
+        db.clear_display_for(name, season, part)
+        db.clear_display_for(name, "", "")
+        _recalc_manage_group(manage, name, season, part)
+        context.user_data["manage"] = manage
+        await query.answer(
+            f"↩️ نام ظاهری «{name}» به نام واقعی‌اش برگشت."
+        )
+        return await _refresh_current(chat_id, context, manage)
+
+    if data.startswith("alias_reset_detail:"):
+        session_id = data.split(":", 1)[1]
+        link = db.get_upload_by_id(session_id)
+        if not link:
+            await query.answer("❌ لینک پیدا نشد.", show_alert=True)
+            return MANAGE_DETAIL
+        name = link["anime_name"]
+        season = link.get("season_num") or ""
+        part = link.get("part_num") or ""
+        db.clear_display_for(name, season, part)
+        db.clear_display_for(name, "", "")
+        for key in ("edit_session", "edit_field", "waiting_for_input"):
+            context.user_data.pop(key, None)
+        manage["name"] = name
+        manage["season"] = season
+        manage["part"] = part
+        _recalc_manage_group(manage, name, season, part)
+        context.user_data["manage"] = manage
+        await query.answer("↩️ نام ظاهری به نام واقعی برگشت.")
         await show_link_detail(chat_id, context, session_id)
         return MANAGE_DETAIL
 
@@ -442,6 +547,37 @@ async def _dispatch_management(
         _, action, session_id = data.split(":", 2)
         context.user_data["edit_session"] = session_id
         context.user_data["edit_field"] = action
+
+        if action == "alias":
+            # R12: نام ظاهری در سطح (نام واقعی، فصل، پارت)
+            link = db.get_upload_by_id(session_id)
+            if not link:
+                await query.answer("❌ لینک پیدا نشد.", show_alert=True)
+                for key in ("edit_session", "edit_field"):
+                    context.user_data.pop(key, None)
+                return MANAGE_DETAIL
+            current = db.get_display_for(
+                link["anime_name"],
+                link.get("season_num"),
+                link.get("part_num"),
+            )
+            await query.edit_message_text(
+                "🎭 تغییر نام ظاهری — فقط برای همین فصل/پارت\n\n"
+                f"📛 نام واقعی: {link['anime_name']}\n"
+                f"🎭 نام ظاهری فعلی: {current}\n\n"
+                "نام ظاهری جدید (فقط حروف انگلیسی) را وارد کن:\n"
+                "• اگر با نام ظاهری انیمه دیگری یکی شود، در لیست اول "
+                "پیش هم قرار می‌گیرند.\n"
+                "• اگر متفاوت باشد، این فصل/پارت یک انیمه جدا حساب "
+                "می‌شود.\n\n"
+                "برای لغو /cancel را تایپ کن.",
+                reply_markup=_alias_reset_keyboard(
+                    f"alias_reset_detail:{session_id}",
+                    f"view_link:{session_id}",
+                ),
+            )
+            context.user_data["waiting_for_input"] = True
+            return MANAGE_EDIT
 
         if action == "quality":
             await query.edit_message_text(
@@ -565,18 +701,20 @@ async def _dispatch_management(
         return MANAGE_DETAIL
 
     if data.startswith("add_quality:"):
+        # P17 — دکمه از صفحه‌ی جزئیات به لیست کیفیت‌ها منتقل شد؛
+        # state هم همان MANAGE_QUALITIES می‌ماند.
         session_id = data.split(":", 1)[1]
         ref = db.get_upload_by_id(session_id)
         if not ref:
             await query.answer("لینک مرجع پیدا نشد.")
-            return MANAGE_DETAIL
+            return MANAGE_QUALITIES
 
         context.user_data["add_quality_ref"] = ref
         await query.edit_message_text(
             "📹 کیفیت جدید را انتخاب کن:",
             reply_markup=build_add_quality_keyboard(session_id),
         )
-        return MANAGE_DETAIL
+        return MANAGE_QUALITIES
 
     if data.startswith("aq_"):
         quality = data[3:]

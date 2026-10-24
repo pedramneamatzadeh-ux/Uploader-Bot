@@ -64,13 +64,17 @@ from .constants import (
     SETTINGS_DURATION,
     SETTINGS_PANEL,
     SETTINGS_BUTTON,
+    WAIT_REPORT_TEXT,
 )
 from .keyboards import quality_pattern_string
 from .handlers.backup import handle_backup
 from .handlers.base import (
-    handle_report_callback,
+    receive_report_text,
     recheck_callback,
+    report_cancel,
+    report_skip,
     start,
+    start_report,
 )
 from .handlers.broadcast import (
     cancel_broadcast,
@@ -144,6 +148,12 @@ from .handlers.settings import (
     receive_db_name_input,
     receive_duration_input,
     settings_callback,
+)
+from .services.panels import (
+    PANEL_BUTTONS_PATTERN,
+    panel_gate,
+    register_panels,
+    stale_callback_answer,
 )
 
 
@@ -575,29 +585,94 @@ def _build_settings_conversation() -> ConversationHandler:
     )
 
 
+def _build_report_conversation() -> ConversationHandler:
+    """R8+: گزارش خرابی لینک — پس از زدن دکمه، توضیحات خواسته می‌شود.
+
+    تایم‌اوت ۳ دقیقه: اگر کاربر متن نفرستد، حالت پاک می‌شود و
+    پیام‌های بعدی او (مثل لینک جدید) گیر نمی‌کنند.
+    """
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(start_report, pattern=r"^report:")
+        ],
+        states={
+            WAIT_REPORT_TEXT: [
+                CallbackQueryHandler(
+                    report_skip, pattern=r"^report_skip$"
+                ),
+                CallbackQueryHandler(
+                    report_cancel, pattern=r"^report_cancel$"
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    receive_report_text,
+                ),
+            ],
+        },
+        fallbacks=[],
+        conversation_timeout=180,
+    )
+
+
 def build_application() -> Application:
     application = Application.builder().token(config.BOT_TOKEN).build()
 
     quality_pattern = quality_pattern_string()
 
+    # P16 — گیتِ پنل‌ها (group -1): با هر دکمه‌ی پنل، اول state همه‌ی
+    # پنل‌های بازِ همان کاربر پاک می‌شود تا پنل مقصد تمیز باز شود و
+    # catch-all پنل قبلی دکمه‌های پنل جدید را نبلعد.
+    application.add_handler(
+        MessageHandler(filters.Regex(PANEL_BUTTONS_PATTERN), panel_gate),
+        group=-1,
+    )
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(
         CallbackQueryHandler(recheck_callback, pattern=r"^recheck:")
     )
-    application.add_handler(
-        CallbackQueryHandler(handle_report_callback, pattern=r"^report:")
-    )
+    report_conv = _build_report_conversation()
+    application.add_handler(report_conv)
 
-    application.add_handler(_build_upload_conversation())
-    application.add_handler(_build_ongoing_conversation(quality_pattern))
-    application.add_handler(_build_management_conversation())
-    application.add_handler(_build_stats_conversation())
-    application.add_handler(_build_broadcast_conversation())
-    application.add_handler(_build_post_conversation())
-    application.add_handler(_build_settings_conversation())
+    upload_conv = _build_upload_conversation()
+    ongoing_conv = _build_ongoing_conversation(quality_pattern)
+    management_conv = _build_management_conversation()
+    stats_conv = _build_stats_conversation()
+    broadcast_conv = _build_broadcast_conversation()
+    post_conv = _build_post_conversation()
+    settings_conv = _build_settings_conversation()
+
+    application.add_handler(upload_conv)
+    application.add_handler(ongoing_conv)
+    application.add_handler(management_conv)
+    application.add_handler(stats_conv)
+    application.add_handler(broadcast_conv)
+    application.add_handler(post_conv)
+    application.add_handler(settings_conv)
 
     application.add_handler(
         MessageHandler(filters.Regex("^💾 بک‌آپ$"), handle_backup)
+    )
+
+    # P16 — پاسخ به callbackهای بی‌صاحب (دکمه‌های پنل‌های بسته‌شده).
+    # باید آخرین هندلر group 0 باشد تا فقط آن‌هایی را بگیرد که هیچ
+    # هندلر دیگری match نشده است.
+    application.add_handler(CallbackQueryHandler(stale_callback_answer))
+
+    # P16 — ثبت پنل‌ها برای گیتِ بالا (report هم هست: اگر وسط گزارش
+    # دکمه‌ی پنلی زده شود، state گزارش هم پاک شود).
+    register_panels(
+        application,
+        {
+            "report": report_conv,
+            "upload": upload_conv,
+            "ongoing": ongoing_conv,
+            "management": management_conv,
+            "stats": stats_conv,
+            "broadcast": broadcast_conv,
+            "post": post_conv,
+            "settings": settings_conv,
+        },
     )
 
     return application

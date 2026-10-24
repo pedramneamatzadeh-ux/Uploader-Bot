@@ -128,6 +128,20 @@ async def show_quality_list(
             ]
         )
 
+    if rows:
+        # P17 — «افزودن کیفیت جدید» از صفحه‌ی جزئیات به اینجا منتقل شد:
+        # مرجع = اولین لینک همین لیست (نام/فصل/پارت/قسمت از آن کپی
+        # می‌شود و فقط کیفیت و محدوده پرسیده می‌شود).
+        keyboard.append(
+            [
+                ib(
+                    "➕ افزودن کیفیت جدید",
+                    callback_data=f"add_quality:{rows[0]['session_id']}",
+                    style="success",
+                )
+            ]
+        )
+
     keyboard.append(
         [
             ib("◀️ بازگشت", callback_data="mg_back"),

@@ -94,13 +94,14 @@ async def show_link_detail(
     )
     lines.append(f"🗄️ دیتابیس: {db_name}")
     physical_name = link["anime_name"]
-    display_name = db.get_display_map().get(physical_name, physical_name)
-    if display_name != physical_name:
-        lines.append(
-            f"🎬 انیمه: {display_name} (نام واقعی: {physical_name})"
-        )
-    else:
-        lines.append(f"🎬 انیمه: {physical_name}")
+    # R12: نام ظاهری مؤثر برای همین فصل/پارت (پیش‌فرض = نام واقعی)
+    display_name = db.get_display_for(
+        physical_name,
+        link.get("season_num"),
+        link.get("part_num"),
+    )
+    lines.append(f"📛 نام واقعی: {physical_name}")
+    lines.append(f"🎭 نام ظاهری: {display_name}")
 
     if is_cinema:
         lines.append(
@@ -141,6 +142,12 @@ async def show_link_detail(
             ],
             [
                 ib(
+                    "🎭 ویرایش نام ظاهری (همین فصل)",
+                    callback_data=f"edit:alias:{session_id}",
+                )
+            ],
+            [
+                ib(
                     "📹 ویرایش کیفیت", callback_data=f"edit:quality:{session_id}"),
                 ib(
                     "🔢 ویرایش محدوده", callback_data=f"edit:channel:{session_id}"),
@@ -150,12 +157,6 @@ async def show_link_detail(
                     toggle_label, callback_data=f"toggle:{session_id}"),
                 ib(
                     "🗑️ حذف", callback_data=f"delete:{session_id}"),
-            ],
-            [
-                ib(
-                    "➕ افزودن کیفیت جدید برای این انیمه",
-                    callback_data=f"add_quality:{session_id}",
-                )
             ],
             [
                 ib("📋 بازگشت به لیست",
@@ -174,6 +175,12 @@ async def show_link_detail(
             ],
             [
                 ib(
+                    "🎭 ویرایش نام ظاهری (همین فصل)",
+                    callback_data=f"edit:alias:{session_id}",
+                )
+            ],
+            [
+                ib(
                     "📦 ویرایش پارت", callback_data=f"edit:part:{session_id}"),
                 ib(
                     "📺 ویرایش قسمت‌ها", callback_data=f"edit:episode:{session_id}"),
@@ -189,12 +196,6 @@ async def show_link_detail(
                     toggle_label, callback_data=f"toggle:{session_id}"),
                 ib(
                     "🗑️ حذف", callback_data=f"delete:{session_id}"),
-            ],
-            [
-                ib(
-                    "➕ افزودن کیفیت جدید برای این انیمه",
-                    callback_data=f"add_quality:{session_id}",
-                )
             ],
             [
                 ib("📋 بازگشت به لیست",

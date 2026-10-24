@@ -43,10 +43,11 @@ from ...utils import (
     validate_episode_input,
 )
 
-from .common import _manage
+from .common import _manage, _recalc_manage_group
 from .detail import show_link_detail
 from .groups import show_group_list
 from .list_l1 import show_link_list
+from .qualities import show_quality_list
 from .refresh import _refresh_current
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ async def handle_edit_input(
     if rename_mode:
         if text.lower() == "/cancel":
             context.user_data.pop("rename_waiting", None)
+            context.user_data.pop("rename_triple", None)
             await update.message.reply_text("❌ تغییر نام لغو شد.")
             # مرحله ۵د: برگشت به همان صفحه‌ای که عملیات از آنجا شروع شد
             return await _refresh_current(chat_id, context, manage)
@@ -102,40 +104,69 @@ async def handle_edit_input(
 
         if not members:
             context.user_data.pop("rename_waiting", None)
+            context.user_data.pop("rename_triple", None)
             await update.message.reply_text("❌ نام انیمه پیدا نشد.")
             await show_link_list(chat_id, context, manage.get("page", 0))
             return MANAGE_LIST
 
         if rename_mode == "display":
-            old_display = (
-                manage.get("display_name") or manage.get("name") or ""
-            )
-            if text == old_display:
+            # R12-2: نام ظاهری در سطح عضو (نام واقعی، فصل، پارت) —
+            # ادغام/جداسازی خودکار از روی برابری نام‌های ظاهری.
+            triple = context.user_data.pop("rename_triple", None)
+            if not triple:
+                triple = (
+                    manage.get("name") or "",
+                    manage.get("season") or "",
+                    manage.get("part") or "",
+                )
+            name, season, part = triple
+            if not name:
+                context.user_data.pop("rename_waiting", None)
+                await update.message.reply_text("❌ نام انیمه پیدا نشد.")
+                await show_link_list(
+                    chat_id, context, manage.get("page", 0)
+                )
+                return MANAGE_LIST
+
+            old_alias = db.get_display_for(name, season, part)
+            if text == old_alias:
                 await update.message.reply_text(
                     "نام جدید با نام ظاهری فعلی یکسان است.\n"
                     "نام دیگری وارد کن یا /cancel را تایپ کن."
                 )
                 return MANAGE_EDIT
 
-            # فقط برچسب: نام لینک‌ها و رکوردها دست نمی‌خورند
-            db.set_display_names(members, text)
+            group_display = manage.get("display_name") or ""
+            members_now = manage.get("l2") or []
+            if text == group_display and len(members_now) > 1:
+                await update.message.reply_text(
+                    "❌ این نام با نام ظاهری گروه فعلی یکی است —\n"
+                    "برای جداسازی نام متفاوتی وارد کن "
+                    "یا /cancel را تایپ کن."
+                )
+                return MANAGE_EDIT
+
+            # فقط برچسب سطح عضو: نام لینک‌ها و رکوردها دست نمی‌خورند
+            db.set_display_for(name, season, part, text)
             context.user_data.pop("rename_waiting", None)
 
-            all_members = db.names_for_display(text)
-            added = [name for name in all_members if name not in members]
-
-            manage["display_name"] = text
-            manage["names"] = all_members
-            manage["l2"] = db.get_combined_groups(all_members)
+            before = len(members_now)
+            _recalc_manage_group(manage, name, season, part)
             context.user_data["manage"] = manage
+            after = len(manage.get("l2") or [])
 
             result = (
                 "✅ نام ظاهری تغییر یافت:\n"
-                f"«{old_display}» → «{text}»\n\n"
+                f"«{old_alias}» → «{text}»\n\n"
                 "🔗 نام لینک‌ها تغییری نکرد."
             )
-            if added:
-                result += f"\n🔀 با {len(added)} انیمه دیگر ادغام شد."
+            if after > before:
+                result += (
+                    f"\n🔀 حالا با {after - 1} فصل/پارت دیگر "
+                    "در یک گروه است."
+                )
+            elif after == 1 and before > 1:
+                result += "\n✂️ این فصل/پارت حالا یک انیمه جدا است."
             await update.message.reply_text(result)
             # مرحله ۵د: ماندن در همان صفحه (قسمت‌ها/کیفیت‌ها) با عنوان جدید
             return await _refresh_current(chat_id, context, manage)
@@ -173,13 +204,24 @@ async def handle_edit_input(
 
     if text.lower() == "/cancel":
         await update.message.reply_text("❌ ویرایش لغو شد.")
+        # R12-1 (بهداشت): کلیدهای موقت در مسیر لغو هم پاک می‌شوند
+        # (قبلاً فقط مسیر موفقیت آن‌ها را برمی‌داشت).
         if context.user_data.get("aq_waiting"):
             session_id = context.user_data.get(
                 "add_quality_ref", {}).get("session_id")
+            for key in ("aq_waiting", "aq_quality", "add_quality_ref"):
+                context.user_data.pop(key, None)
+            # P17 — جریان از لیست کیفیت‌ها شروع شده؛ لغو هم به همان‌جا
+            # برمی‌گردد (لیست تغییری نکرده، فقط رفرش می‌شود).
+            if manage.get("level") == 4:
+                await show_quality_list(chat_id, context)
+                return MANAGE_QUALITIES
             if session_id:
                 await show_link_detail(chat_id, context, session_id)
             return MANAGE_DETAIL
         session_id = context.user_data.get("edit_session")
+        for key in ("edit_session", "edit_field", "waiting_for_input"):
+            context.user_data.pop(key, None)
         if session_id:
             await show_link_detail(chat_id, context, session_id)
             return MANAGE_DETAIL
@@ -234,6 +276,24 @@ async def handle_edit_input(
         for key in ("aq_waiting", "aq_quality", "add_quality_ref"):
             context.user_data.pop(key, None)
 
+        # P17 — بازگشت به لیست کیفیت‌ها (l4 بازسازی می‌شود تا لینک
+        # جدید دیده شود)؛ اگر به هر دلیل سطح ۴ نبود، صفحه‌ی جزئیات
+        # لینک مرجع نشان داده می‌شود (رفتار قدیمی).
+        manage = _manage(context)
+        if manage.get("level") == 4:
+            manage["l4"] = db.get_group_links(
+                manage["name"],
+                manage["season"],
+                manage["part"],
+                episode_range=None
+                if manage.get("is_cinema")
+                else manage.get("episode"),
+                anime_type=manage.get("group_type"),
+            )
+            context.user_data["manage"] = manage
+            await show_quality_list(chat_id, context)
+            return MANAGE_QUALITIES
+
         await show_link_detail(chat_id, context, ref["session_id"])
         return MANAGE_DETAIL
 
@@ -243,6 +303,36 @@ async def handle_edit_input(
     if not session_id or not field:
         await update.message.reply_text("❌ اطلاعات ویرایش نامعتبر است.")
         return MANAGE_LIST
+
+    if field == "alias":
+        # R12: ذخیره نام ظاهری برای همین (نام واقعی، فصل، پارت)
+        link = db.get_upload_by_id(session_id)
+        if not link:
+            await update.message.reply_text("❌ لینک پیدا نشد.")
+            return MANAGE_LIST
+
+        valid, error = validate_anime_name(text)
+        if not valid:
+            await update.message.reply_text(
+                f"❌ {error}\nدوباره وارد کن یا /cancel را تایپ کن."
+            )
+            return MANAGE_EDIT
+
+        db.set_display_for(
+            link["anime_name"],
+            link.get("season_num"),
+            link.get("part_num"),
+            text,
+        )
+        for key in ("edit_session", "edit_field", "waiting_for_input"):
+            context.user_data.pop(key, None)
+        await update.message.reply_text(
+            "✅ نام ظاهری همین فصل/پارت تغییر یافت:\n"
+            f"🎭 «{text}»\n\n"
+            "🔗 نام واقعی و لینک‌ها دست نخوردند."
+        )
+        await show_link_detail(chat_id, context, session_id)
+        return MANAGE_DETAIL
 
     if field == "episode":
         valid, error = validate_episode_input(text)

@@ -118,8 +118,11 @@ class CoreMixin:
                 );
 
                 CREATE TABLE IF NOT EXISTS anime_display_names (
-                    anime_name TEXT PRIMARY KEY,
-                    display_name TEXT NOT NULL
+                    anime_name TEXT NOT NULL,
+                    season_num TEXT NOT NULL DEFAULT '',
+                    part_num TEXT NOT NULL DEFAULT '',
+                    display_name TEXT NOT NULL,
+                    PRIMARY KEY (anime_name, season_num, part_num)
                 );
 
                 CREATE TABLE IF NOT EXISTS settings (
@@ -191,6 +194,42 @@ class CoreMixin:
                     connection.execute(migration)
                 except sqlite3.OperationalError:
                     pass
+
+            # --- R12-1: مهاجرت جدول نام ظاهری به سطح (نام، فصل، پارت) ---
+            # ردیف‌های قدیمی (به‌ازای کل نام واقعی) با season='' و part=''
+            # نگه داشته می‌شوند = «برچسب پیش‌فرض کل نام» ⇒ گروه‌بندی
+            # فعلی بلافاصله بعد از مهاجرت دقیقاً مثل قبل می‌ماند.
+            cols = [
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(anime_display_names)"
+                ).fetchall()
+            ]
+            if cols and "season_num" not in cols:
+                connection.execute(
+                    "ALTER TABLE anime_display_names "
+                    "RENAME TO anime_display_names_old"
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE anime_display_names (
+                        anime_name TEXT NOT NULL,
+                        season_num TEXT NOT NULL DEFAULT '',
+                        part_num TEXT NOT NULL DEFAULT '',
+                        display_name TEXT NOT NULL,
+                        PRIMARY KEY (anime_name, season_num, part_num)
+                    )
+                    """
+                )
+                connection.execute(
+                    "INSERT INTO anime_display_names "
+                    "    (anime_name, season_num, part_num, display_name) "
+                    "SELECT anime_name, '', '', display_name "
+                    "FROM anime_display_names_old"
+                )
+                connection.execute(
+                    "DROP TABLE anime_display_names_old"
+                )
 
             # --- مهاجرت داده: نام کیفیت x256 → x265 (idempotent) ---
             connection.execute(

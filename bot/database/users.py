@@ -96,28 +96,113 @@ class UsersMixin:
                 (session_id, user_id),
             )
 
-    def get_top_anime(
+    def get_top_anime_grouped(
         self,
         limit: int = 10,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
+        """R8b: پرطرفدارها گروه‌بندی‌شده بر (نام، نوع، فصل، پارت).
+
+        همه کیفیت‌ها با هم شمارش می‌شوند:
+        - users_count = کاربران یکتا (هر کاربر برای هر فصل/پارت یک‌بار،
+          حتی اگر چند کیفیت یا چندبار دانلود کرده باشد)
+        - total_count = کل واقعی دانلودها
+        """
         with self.connect() as connection:
             rows = connection.execute(
                 """
                 SELECT
                     uploads.anime_name,
-                    uploads.quality,
-                    COUNT(downloads.id) AS download_count
+                    COALESCE(uploads.anime_type, '') AS anime_type,
+                    COALESCE(uploads.season_num, '') AS season_num,
+                    COALESCE(uploads.part_num, '') AS part_num,
+                    COUNT(DISTINCT downloads.user_id) AS users_count,
+                    COUNT(downloads.id) AS total_count
                 FROM downloads
                 JOIN uploads
                     ON downloads.session_id = uploads.session_id
-                GROUP BY uploads.session_id
-                ORDER BY download_count DESC
-                LIMIT ?
+                GROUP BY
+                    uploads.anime_name,
+                    anime_type,
+                    season_num,
+                    part_num
+                ORDER BY users_count DESC, total_count DESC
+                LIMIT ? OFFSET ?
                 """,
-                (limit,),
+                (limit, offset),
             ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def count_top_anime_groups(self) -> int:
+        """R8b: تعداد کل گروه‌های (نام، نوع، فصل، پارت) دارای دانلود."""
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT COUNT(*) FROM (
+                    SELECT 1
+                    FROM downloads
+                    JOIN uploads
+                        ON downloads.session_id = uploads.session_id
+                    GROUP BY
+                        uploads.anime_name,
+                        COALESCE(uploads.anime_type, ''),
+                        COALESCE(uploads.season_num, ''),
+                        COALESCE(uploads.part_num, '')
+                )
+                """
+            ).fetchone()[0]
+
+    def get_user_download_info(self) -> Dict[int, Dict[str, Any]]:
+        """R8a: برای هر کاربر — آخرین دانلود + شمار یکتای فصل/پارت.
+
+        خروجی: {user_id: {"last": {...} یا None, "uniq": int}}
+        """
+        with self.connect() as connection:
+            last_rows = connection.execute(
+                """
+                SELECT
+                    downloads.user_id,
+                    uploads.anime_name,
+                    COALESCE(uploads.anime_type, '') AS anime_type,
+                    COALESCE(uploads.season_num, '') AS season_num,
+                    COALESCE(uploads.part_num, '') AS part_num,
+                    uploads.quality,
+                    downloads.downloaded_at
+                FROM downloads
+                JOIN uploads
+                    ON downloads.session_id = uploads.session_id
+                WHERE downloads.id IN (
+                    SELECT MAX(id) FROM downloads GROUP BY user_id
+                )
+                """
+            ).fetchall()
+            uniq_rows = connection.execute(
+                """
+                SELECT
+                    downloads.user_id,
+                    COUNT(DISTINCT
+                        uploads.anime_name || '|' ||
+                        COALESCE(uploads.anime_type, '') || '|' ||
+                        COALESCE(uploads.season_num, '') || '|' ||
+                        COALESCE(uploads.part_num, '')
+                    ) AS uniq_count
+                FROM downloads
+                JOIN uploads
+                    ON downloads.session_id = uploads.session_id
+                GROUP BY downloads.user_id
+                """
+            ).fetchall()
+
+        info: Dict[int, Dict[str, Any]] = {}
+        for row in uniq_rows:
+            info[row["user_id"]] = {"last": None, "uniq": row["uniq_count"]}
+        for row in last_rows:
+            entry = info.setdefault(
+                row["user_id"], {"last": None, "uniq": 0}
+            )
+            entry["last"] = dict(row)
+        return info
 
     def count_total_downloads(self) -> int:
         with self.connect() as connection:
@@ -187,6 +272,43 @@ class UsersMixin:
             ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def get_report_by_id(
+        self,
+        report_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """R8c: جزئیات کامل یک گزارش + اطلاعات فایل + یوزرنیم گزارش‌دهنده."""
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    reports.id,
+                    reports.session_id,
+                    reports.user_id,
+                    reports.report_text,
+                    reports.status,
+                    reports.created_at,
+                    uploads.anime_name,
+                    COALESCE(uploads.anime_type, '') AS anime_type,
+                    COALESCE(uploads.season_num, '') AS season_num,
+                    COALESCE(uploads.part_num, '') AS part_num,
+                    uploads.episode_range,
+                    uploads.quality,
+                    uploads.channel_chat_id,
+                    uploads.channel_msg_range,
+                    COALESCE(uploads.status, 'active') AS upload_status,
+                    users.username AS reporter_username
+                FROM reports
+                JOIN uploads
+                    ON reports.session_id = uploads.session_id
+                LEFT JOIN users
+                    ON users.user_id = reports.user_id
+                WHERE reports.id = ?
+                """,
+                (report_id,),
+            ).fetchone()
+
+        return dict(row) if row else None
 
     def count_reports(
         self,
