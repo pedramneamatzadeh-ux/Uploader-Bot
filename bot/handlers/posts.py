@@ -199,9 +199,7 @@ async def show_post_list(
         ]
     else:
         lines = ["📋 لیست پست‌ها:\n"]
-        keyboard = [
-            [ib("📤 آپلود پست جدید", callback_data="pm_upload_new")]
-        ]
+        keyboard = []
 
         delivery_stats = db.get_all_post_delivery_stats()
         for idx, item in enumerate(items, start=1):
@@ -229,6 +227,10 @@ async def show_post_list(
         lines.append(f"\n📄 صفحه {page + 1} از {pages} ({total} پست)")
         text = "\n".join(lines)
 
+        # B12: «آپلود پست جدید» بالای دکمه‌های قبلی/بعدی (درخواست کاربر)
+        keyboard.append(
+            [ib("📤 آپلود پست جدید", callback_data="pm_upload_new")]
+        )
         nav = build_pagination_row(
             page,
             pages,

@@ -28,9 +28,9 @@ from ...constants import (
 from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
-    ANIME_TYPE_MENU,
     CANCEL_MENU,
     airing_status_keyboard,
+    anime_type_keyboard,
     db_select_page1_keyboard,
     db_select_page2_keyboard,
     main_menu_for,
@@ -82,7 +82,7 @@ async def receive_airing_status(
     await context.bot.send_message(
         chat_id=query.from_user.id,
         text="این انیمه سینمایی است یا سریالی؟",
-        reply_markup=ANIME_TYPE_MENU,
+        reply_markup=anime_type_keyboard(),
     )
     return ANIME_TYPE
 
@@ -109,12 +109,54 @@ async def receive_anime_type(
     else:
         await update.message.reply_text(
             "❌ لطفاً یکی از گزینه‌ها را انتخاب کن:",
-            reply_markup=ANIME_TYPE_MENU,
+            reply_markup=anime_type_keyboard(),
         )
         return ANIME_TYPE
 
     await update.message.reply_text(
         f"✅ نوع: {text}\n\nاسم انیمه را وارد کن: (فقط حروف انگلیسی)",
+        reply_markup=CANCEL_MENU,
+    )
+    return ANIME_NAME
+
+
+@admin_only
+async def receive_anime_type_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    """B11: انتخاب نوع انیمه با دکمهٔ inline (uptype:*).
+
+    هندلر متنی receive_anime_type هم برای کیبوردهای قدیمیِ باقی‌مانده
+    در state می‌ماند.
+    """
+    query = update.callback_query
+    if not query or not query.data:
+        return ANIME_TYPE
+
+    data = query.data
+
+    if data == "uptype:cancel":
+        await query.answer()
+        await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
+        await go_to_main_menu(context, query.from_user.id)
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if data == "uptype:movie":
+        value = "سینمایی"
+    elif data == "uptype:series":
+        value = "سریالی"
+    else:
+        return ANIME_TYPE
+
+    await query.answer()
+    context.user_data["anime_type"] = value
+
+    await query.edit_message_text(f"✅ نوع: {value}")
+    await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text="اسم انیمه را وارد کن: (فقط حروف انگلیسی)",
         reply_markup=CANCEL_MENU,
     )
     return ANIME_NAME

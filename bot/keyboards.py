@@ -73,13 +73,14 @@ MAIN_MENU = ReplyKeyboardMarkup(
 
 
 def main_menu_for(user_id: Optional[int]) -> ReplyKeyboardMarkup:
-    """منوی اصلی بر اساس نقش (R2): فقط مالک دکمه «تنظیمات» را می‌بیند."""
+    """منوی اصلی بر اساس نقش (R2+B13): مالک و ادمین‌ها دکمهٔ
+    «تنظیمات» را می‌بینند — ولی ورودی آن owner_only است، پس برای
+    ادمین‌ها کار نمی‌کند (فقط «دسترسی ندارید»)."""
     rows = [_main_menu_row(row) for row in MAIN_MENU_ROWS]
 
-    if (
-        user_id is not None
-        and config.OWNER_ID is not None
-        and user_id == config.OWNER_ID
+    if user_id is not None and (
+        user_id == config.OWNER_ID
+        or user_id in config.ADMIN_IDS
     ):
         rows[-1] = rows[-1] + [
             KeyboardButton(SETTINGS_BUTTON, style="primary")
@@ -96,18 +97,6 @@ CANCEL_MENU = ReplyKeyboardMarkup(
 
 MANAGE_CANCEL_MENU = ReplyKeyboardMarkup(
     [[KeyboardButton("لغو", style="danger")]],
-    resize_keyboard=True,
-)
-
-
-ANIME_TYPE_MENU = ReplyKeyboardMarkup(
-    [
-        [
-            KeyboardButton("🎬 سینمایی", style="success"),
-            KeyboardButton("📺 سریالی", style="success"),
-        ],
-        [KeyboardButton("لغو آپلود", style="danger")],
-    ],
     resize_keyboard=True,
 )
 
@@ -384,6 +373,19 @@ def db_select_page2_keyboard(
         [ib("❌ لغو", callback_data="dbsel_cancel")]
     )
     return InlineKeyboardMarkup(keyboard)
+
+
+def anime_type_keyboard() -> InlineKeyboardMarkup:
+    """B11: «سینمایی یا سریالی» به‌صورت inline (هم‌شکل وضعیت پخش)."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                ib("🎬 سینمایی", callback_data="uptype:movie"),
+                ib("📺 سریالی", callback_data="uptype:series"),
+            ],
+            [ib("لغو آپلود", callback_data="uptype:cancel")],
+        ]
+    )
 
 
 def airing_status_keyboard() -> InlineKeyboardMarkup:

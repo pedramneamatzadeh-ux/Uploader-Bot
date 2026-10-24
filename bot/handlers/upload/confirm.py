@@ -30,7 +30,6 @@ from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
     ib,
-    ANIME_TYPE_MENU,
     CANCEL_MENU,
     airing_status_keyboard,
     db_select_page1_keyboard,

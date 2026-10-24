@@ -28,7 +28,6 @@ from ...constants import (
 from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
-    ANIME_TYPE_MENU,
     CANCEL_MENU,
     airing_status_keyboard,
     db_select_page1_keyboard,
@@ -60,6 +59,7 @@ from .structure import part_callback
 from .identity import receive_airing_status
 from .identity import receive_anime_name
 from .identity import receive_anime_type
+from .identity import receive_anime_type_callback
 from .structure import receive_episode_range
 from .structure import receive_movie_num
 from .structure import receive_part_num
@@ -79,6 +79,7 @@ __all__ = [
     "receive_airing_status",
     "receive_anime_name",
     "receive_anime_type",
+    "receive_anime_type_callback",
     "receive_episode_range",
     "receive_movie_num",
     "receive_part_num",

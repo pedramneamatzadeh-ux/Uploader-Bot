@@ -132,6 +132,7 @@ from .handlers.upload import (
     receive_airing_status,
     receive_anime_name,
     receive_anime_type,
+    receive_anime_type_callback,
     receive_episode_range,
     receive_movie_num,
     receive_part_num,
@@ -185,7 +186,12 @@ def _build_upload_conversation() -> ConversationHandler:
                 )
             ],
             ANIME_TYPE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_anime_type)
+                # B11: دکمه‌های inline نوع انیمه
+                CallbackQueryHandler(
+                    receive_anime_type_callback,
+                    pattern=r"^uptype:",
+                ),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_anime_type),
             ],
             ANIME_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_anime_name)
