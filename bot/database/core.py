@@ -155,12 +155,13 @@ class CoreMixin:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     anime_name TEXT NOT NULL,
                     season_num TEXT NOT NULL DEFAULT '',
+                    part_num TEXT NOT NULL DEFAULT '',
                     summary_text TEXT NOT NULL DEFAULT '',
                     photo_file_id TEXT,
                     created_by INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(anime_name, season_num)
+                    UNIQUE(anime_name, season_num, part_num)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_downloads_session
@@ -253,6 +254,53 @@ class CoreMixin:
                 )
                 connection.execute(
                     "DROP TABLE anime_display_names_old"
+                )
+
+            # --- B14: افزودن part_num به جدول خلاصه داستان ---
+            # خلاصهٔ هر (نام، فصل، پارت) جدا ثبت می‌شود. ردیف‌های قدیمی
+            # با part_num='' نگه داشته می‌شوند = «خلاصهٔ اشتراکی فصل» و
+            # تا وقتی خلاصهٔ پارت‌مشخص ثبت نشود، به‌عنوان fallback برای
+            # همهٔ پارت‌ها نمایش داده می‌شوند. idها حفظ می‌شوند ⇒ لینک‌های
+            # اشتراک‌گذاری sm<id> نمی‌شکنند (شرط R4).
+            cols = [
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(season_summaries)"
+                ).fetchall()
+            ]
+            if cols and "part_num" not in cols:
+                connection.execute(
+                    "ALTER TABLE season_summaries "
+                    "RENAME TO season_summaries_old"
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE season_summaries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        anime_name TEXT NOT NULL,
+                        season_num TEXT NOT NULL DEFAULT '',
+                        part_num TEXT NOT NULL DEFAULT '',
+                        summary_text TEXT NOT NULL DEFAULT '',
+                        photo_file_id TEXT,
+                        created_by INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(anime_name, season_num, part_num)
+                    )
+                    """
+                )
+                connection.execute(
+                    "INSERT INTO season_summaries "
+                    "    (id, anime_name, season_num, part_num, "
+                    "     summary_text, photo_file_id, created_by, "
+                    "     created_at, updated_at) "
+                    "SELECT id, anime_name, season_num, '', "
+                    "       summary_text, photo_file_id, created_by, "
+                    "       created_at, updated_at "
+                    "FROM season_summaries_old"
+                )
+                connection.execute(
+                    "DROP TABLE season_summaries_old"
                 )
 
             # --- مهاجرت داده: نام کیفیت x256 → x265 (idempotent) ---

@@ -707,7 +707,9 @@ async def _dispatch_management(
         session_id = data.split(":", 1)[1]
         if db.delete_upload(session_id):
             await query.edit_message_text("✅ لینک با موفقیت حذف شد.")
-            manage.pop("detail_message_id", None)
+            # B16: پیامِ جاری حالا toast حذف است ⇒ لیست بعدی با پیام
+            # جدید ارسال شود (list_message_id پاک می‌شود).
+            manage.pop("list_message_id", None)
             if manage.get("l4") is not None:
                 manage["l4"] = [
                     row

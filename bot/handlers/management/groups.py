@@ -84,7 +84,21 @@ async def show_group_list(
         distinct_names = {
             group.get("anime_name") for group in groups
         }
-        multi_name = len(distinct_names) > 1
+        # B15: برچسب بلند «نام واقعی — فصل» فقط وقتی لازم است که
+        # برچسب‌های کوتاهِ اعضا با هم تداخل کنند؛ وگرنه همان
+        # Season/Movie استاندارد (درخواست کاربر — مثال Re:Zero).
+        _short_labels = [
+            _group_label(
+                group.get("season_num") or "",
+                group.get("part_num") or "",
+                bool(group.get("is_cinema")),
+            )
+            for group in groups
+        ]
+        multi_name = (
+            len(distinct_names) > 1
+            and len(set(_short_labels)) < len(_short_labels)
+        )
 
         lines = []
         for idx, group in enumerate(groups):

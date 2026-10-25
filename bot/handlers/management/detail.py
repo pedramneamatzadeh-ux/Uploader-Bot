@@ -210,7 +210,9 @@ async def show_link_detail(
         ]
 
     manage = _manage(context)
-    msg_id = manage.get("detail_message_id")
+    # B16: جزئیات هم روی همان پیام پنل (list_message_id) ویرایش
+    # می‌شود ⇒ تک‌پیامی و «بازگشت» همیشه دیده می‌شود.
+    msg_id = manage.get("list_message_id")
     new_id = await safe_edit_or_send(
         context,
         chat_id,
@@ -219,6 +221,6 @@ async def show_link_detail(
         msg_id,
         parse_mode="HTML",
     )
-    manage["detail_message_id"] = new_id
+    manage["list_message_id"] = new_id
     manage["current_session"] = session_id
     context.user_data["manage"] = manage

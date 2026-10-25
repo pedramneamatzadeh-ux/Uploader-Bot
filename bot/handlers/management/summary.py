@@ -28,15 +28,21 @@ MAX_SUMMARY_LEN = 3700
 
 
 def _summary_ref(manage: dict) -> tuple:
-    """(نام فیزیکی، شماره فصل، برچسب نمایشی) از state مدیریت."""
+    """(نام فیزیکی، فصل، پارت، برچسب نمایشی) از state مدیریت.
+
+    B14: خلاصه داستان برای هر پارت جدا ثبت/خوانده می‌شود.
+    """
     name = manage.get("name") or ""
     season = manage.get("season") or ""
+    part = manage.get("part") or ""
     display = manage.get("display_name") or name
     if manage.get("is_cinema"):
         label = f"🎬 {display} — Movie {season or '؟'}"
     else:
         label = f"🎬 {display} — فصل {season or '؟'}"
-    return name, season, label
+        if part:
+            label += f" | پارت {part}"
+    return name, season, part, label
 
 
 async def _show_panel(
@@ -45,8 +51,8 @@ async def _show_panel(
     manage: dict,
 ) -> int:
     """صفحه خلاصه (یا پرامپت اگر ثبت نشده) — روی همان پیام لیست ویرایش می‌شود."""
-    name, season, label = _summary_ref(manage)
-    summary = db.get_season_summary(name, season)
+    name, season, part, label = _summary_ref(manage)
+    summary = db.get_season_summary(name, season, part)
     origin = _level_state(manage)
 
     if not summary:
@@ -137,7 +143,7 @@ async def handle_summary_callback(
 ) -> int:
     """شاخه‌های callback خلاصه داستان (از dispatch فراخوانی می‌شود)."""
     chat_id = query.message.chat_id if query.message else query.from_user.id
-    name, season, label = _summary_ref(manage)
+    name, season, part, label = _summary_ref(manage)
     origin = _level_state(manage)
 
     if data == "mg_sum":
@@ -182,7 +188,7 @@ async def handle_summary_callback(
         return MANAGE_SUMMARY_PHOTO
 
     if data == "mg_sum_show":
-        summary = db.get_season_summary(name, season)
+        summary = db.get_season_summary(name, season, part)
         file_id = summary.get("photo_file_id") if summary else None
         if not file_id:
             await query.answer(
@@ -210,7 +216,7 @@ async def handle_summary_callback(
         return origin
 
     if data == "mg_sum_del_photo":
-        summary = db.get_season_summary(name, season)
+        summary = db.get_season_summary(name, season, part)
         if not summary or not summary.get("photo_file_id"):
             await query.answer(
                 "❌ عکسی ثبت نشده است.", show_alert=True
@@ -222,6 +228,7 @@ async def handle_summary_callback(
             summary.get("summary_text") or "",
             photo_file_id=None,
             created_by=summary.get("created_by"),
+            part_num=part,
         )
         await query.answer("🖼️ عکس حذف شد؛ متن خلاصه باقی است.")
         return await _show_panel(chat_id, context, manage)
@@ -247,7 +254,7 @@ async def handle_summary_callback(
         return origin
 
     if data == "mg_sum_del_yes":
-        if db.delete_season_summary(name, season):
+        if db.delete_season_summary(name, season, part):
             await query.answer("✅ خلاصه داستان حذف شد.")
         else:
             await query.answer("❌ رکوردی برای حذف نبود.")
@@ -273,7 +280,7 @@ async def handle_summary_text(
         )
         return MANAGE_SUMMARY_PHOTO
 
-    name, _season, _label = _summary_ref(manage)
+    name, _season, _part, _label = _summary_ref(manage)
     if not name:
         await update.message.reply_text("❌ فصلی انتخاب نشده است.")
         return _level_state(manage)
@@ -285,18 +292,19 @@ async def handle_summary_text(
         )
         return MANAGE_SUMMARY_TEXT
 
-    current = db.get_season_summary(name, _season)
+    current = db.get_season_summary(name, _season, _part)
     db.set_season_summary(
         name,
         _season,
         text,
         photo_file_id=(current or {}).get("photo_file_id"),
         created_by=update.effective_user.id,
+        part_num=_part,
     )
     manage.pop("summary_wait", None)
     context.user_data["manage"] = manage
     # لینک اشتراک‌گذاری مثل لینک‌های آپلود (برای ارسال خلاصه به کاربران)
-    saved = db.get_season_summary(name, _season)
+    saved = db.get_season_summary(name, _season, _part)
     reply = "✅ خلاصه داستان ذخیره شد."
     if saved and saved.get("id"):
         try:
@@ -329,8 +337,8 @@ async def handle_summary_photo(
         )
         return MANAGE_SUMMARY_PHOTO
 
-    name, _season, _label = _summary_ref(manage)
-    current = db.get_season_summary(name, _season)
+    name, _season, _part, _label = _summary_ref(manage)
+    current = db.get_season_summary(name, _season, _part)
     if not current:
         await update.message.reply_text(
             "❌ اول متن خلاصه را ثبت کن، بعد عکس را بفرست."
@@ -344,6 +352,7 @@ async def handle_summary_photo(
         current.get("summary_text") or "",
         photo_file_id=file_id,
         created_by=current.get("created_by") or update.effective_user.id,
+        part_num=_part,
     )
     manage.pop("summary_wait", None)
     context.user_data["manage"] = manage

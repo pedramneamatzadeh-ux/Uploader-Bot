@@ -250,8 +250,9 @@ class GroupsMixin:
                     """
                     DELETE FROM season_summaries
                     WHERE anime_name = ?
-                      AND season_num IN (
-                          SELECT season_num FROM season_summaries
+                      AND (season_num, part_num) IN (
+                          SELECT season_num, part_num
+                          FROM season_summaries
                           WHERE anime_name = ?
                       )
                     """,
