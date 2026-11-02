@@ -365,6 +365,33 @@ async def _dispatch_management(
         return EPISODE_RANGE
 
     # --- R10: خلاصه داستان فصل ---
+    if data in ("mg_bluray", "mg_bluray_ep"):
+        # B20/B22: تاگل بلوری دوطرفه — صفحهٔ قسمت‌ها (mg_bluray) کل
+        # فصل/پارت/سینمایی؛ صفحهٔ کیفیت‌ها (mg_bluray_ep) فقط اپیزود
+        # انتخاب‌شده (سینمایی: episode=None ⇒ همان کل فیلم).
+        name = manage.get("name") or ""
+        season = manage.get("season") or ""
+        part = manage.get("part") or ""
+        episode = (
+            manage.get("episode")
+            if data == "mg_bluray_ep"
+            else None
+        )
+        current = db.get_group_bluray(
+            name, season, part, episode_range=episode
+        )
+        new_value = 0 if current else 1
+        changed = db.set_group_bluray(
+            name, season, part, new_value, episode_range=episode
+        )
+        toast = (
+            f"🖨 بلوری شد — {changed} لینک"
+            if new_value
+            else f"🖨 بلوری حذف شد — {changed} لینک"
+        )
+        await query.answer(toast)
+        return await _refresh_current(chat_id, context, manage)
+
     if data.startswith("mg_sum"):
         return await handle_summary_callback(context, manage, query, data)
 

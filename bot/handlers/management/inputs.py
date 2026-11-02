@@ -268,6 +268,7 @@ async def handle_edit_input(
             # TODO مرحله R5: کپی وضعیت پخش از لینک مرجع
             # (برای دیتابیس سفارشی بدون این خط مقدار NULL می‌شد)
             "airing_status": ref.get("airing_status"),
+            "is_bluray": ref.get("is_bluray", 0),
         }
 
         try:

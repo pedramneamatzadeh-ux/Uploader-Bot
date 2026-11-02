@@ -227,3 +227,26 @@ class OngoingMixin:
             )
 
             return cursor.rowcount > 0
+
+    def get_ongoing_by_status(
+        self,
+        status: str,
+    ) -> List[Dict[str, Any]]:
+        """R13: لیست کامل انیمه‌ها با وضعیت مشخص (active/inactive)."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    anime_name,
+                    season_num,
+                    part_num,
+                    COALESCE(status, 'active') AS status
+                FROM ongoing_animes
+                WHERE COALESCE(status, 'active') = ?
+                ORDER BY anime_name, season_num, part_num
+                """,
+                (status,),
+            ).fetchall()
+
+        return [dict(row) for row in rows]

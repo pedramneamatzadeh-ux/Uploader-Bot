@@ -288,17 +288,9 @@ async def receive_ongoing_upload_episode(
 
     upload["episode_range"] = text
 
-    keyboard = [
-        [
-            ib("🔥 سه کیفیت استاندارد 480/720/1080", "primary", callback_data="ogup_mode:std3")
-        ],
-        [ib("🔸 چند کیفیت انتخابی", "primary", callback_data="ogup_mode:multi")],
-        [ib("🔹 تک کیفیت", "primary", callback_data="ogup_mode:single")],
-        [ib("❌ لغو", callback_data="ogup_cancel")],
-    ]
     await update.message.reply_text(
         "نوع آپلود را انتخاب کن:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=_ogup_mode_markup(upload),
     )
     return ONGOING_UPLOAD_MODE
 
@@ -326,7 +318,10 @@ async def handle_ongoing_upload_mode_callback(
     if mode == "single":
         await query.edit_message_text(
             "📹 کیفیت را انتخاب کن:",
-            reply_markup=quality_keyboard("ogup_q:", "ogup_cancel"),
+            reply_markup=quality_keyboard(
+                "ogup_q:", "ogup_cancel",
+                bluray=upload.get("is_bluray", 0),
+            ),
         )
         return ONGOING_UPLOAD_SINGLE_QUALITY
 
@@ -334,7 +329,10 @@ async def handle_ongoing_upload_mode_callback(
         upload["qualities"] = []
         await query.edit_message_text(
             "📹 کیفیت اول را انتخاب کن:",
-            reply_markup=quality_keyboard("ogup_mq:", "ogup_cancel"),
+            reply_markup=quality_keyboard(
+                "ogup_mq:", "ogup_cancel",
+                bluray=upload.get("is_bluray", 0),
+            ),
         )
         return ONGOING_UPLOAD_MULTI_QUALITY
 
@@ -498,7 +496,10 @@ async def ongoing_multi_ask_more_callback(
     if query.data == "ogup_add_more":
         await query.edit_message_text(
             "📹 کیفیت بعدی را انتخاب کن:",
-            reply_markup=quality_keyboard("ogup_mq:", "ogup_cancel"),
+            reply_markup=quality_keyboard(
+                "ogup_mq:", "ogup_cancel",
+                bluray=upload.get("is_bluray", 0),
+            ),
         )
         return ONGOING_UPLOAD_MULTI_QUALITY
 
@@ -512,6 +513,31 @@ async def ongoing_multi_ask_more_callback(
 
     await query.answer(Msg.INVALID_COMMAND)
     return ONGOING_UPLOAD_MULTI_ASK
+
+
+def _ogup_mode_markup(upload: dict) -> InlineKeyboardMarkup:
+    """B20: صفحهٔ انتخاب حالت آپلود + تاگل بلوری."""
+    bluray_on = bool(upload.get("is_bluray"))
+    keyboard = [
+        [
+            ib("🔥 سه کیفیت استاندارد 480/720/1080", "primary", callback_data="ogup_mode:std3")
+        ],
+        [ib("🔸 چند کیفیت انتخابی", "primary", callback_data="ogup_mode:multi")],
+        [ib("🔹 تک کیفیت", "primary", callback_data="ogup_mode:single")],
+        [
+            ib(
+                (
+                    "✅ بلوری (Blu-ray)"
+                    if bluray_on
+                    else "🖨 بلوری (Blu-ray)"
+                ),
+                "primary",
+                callback_data="ogup_bluray",
+            )
+        ],
+        [ib("❌ لغو", callback_data="ogup_cancel")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 
 async def show_ongoing_upload_confirm(
@@ -531,6 +557,7 @@ async def show_ongoing_upload_confirm(
         f"🎞️ فصل: {upload.get('season_num') or 'نامشخص'}",
         f"📦 پارت: {part_display}",
         f"📺 قسمت: {upload.get('episode_range')}",
+        f"🖨 بلوری: {'✅ بله' if upload.get('is_bluray') else '❌ خیر'}",
         "",
     ]
 
@@ -605,6 +632,7 @@ async def confirm_ongoing_upload(
                     "ongoing_anime_id": upload.get("ongoing_anime_id"),
                     "anime_type": "سریالی",
                     "channel_chat_id": channel_chat_id,
+                    "is_bluray": 1 if upload.get("is_bluray") else 0,
                 }
                 db.save_upload(session_id, entry, admin_id)
                 link = await build_download_link(context, session_id)
@@ -622,6 +650,7 @@ async def confirm_ongoing_upload(
                 "ongoing_anime_id": upload.get("ongoing_anime_id"),
                 "anime_type": "سریالی",
                 "channel_chat_id": channel_chat_id,
+                "is_bluray": 1 if upload.get("is_bluray") else 0,
             }
             db.save_upload(session_id, entry, admin_id)
             link = await build_download_link(context, session_id)
@@ -650,3 +679,63 @@ async def confirm_ongoing_upload(
 
     await go_to_ongoing_list(context, query.message.chat_id)
     return ONGOING_LIST
+
+
+# ============================================================================
+# B20: تاگل بلوری در سه صفحهٔ آپلود درحال‌پخش (حالت/تک/چند)
+# ============================================================================
+def _flip_ogup_bluray(context: ContextTypes.DEFAULT_TYPE) -> int:
+    upload = context.user_data.setdefault("ongoing_upload", {})
+    new_value = 0 if upload.get("is_bluray") else 1
+    upload["is_bluray"] = new_value
+    return new_value
+
+
+@admin_only
+async def ogup_bluray_mode(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    _flip_ogup_bluray(context)
+    upload = context.user_data.get("ongoing_upload", {})
+    await query.edit_message_text(
+        "نوع آپلود را انتخاب کن:",
+        reply_markup=_ogup_mode_markup(upload),
+    )
+    return ONGOING_UPLOAD_MODE
+
+
+@admin_only
+async def ogup_bluray_single(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    new_value = _flip_ogup_bluray(context)
+    await query.edit_message_text(
+        "📹 کیفیت را انتخاب کن:",
+        reply_markup=quality_keyboard(
+            "ogup_q:", "ogup_cancel", bluray=new_value
+        ),
+    )
+    return ONGOING_UPLOAD_SINGLE_QUALITY
+
+
+@admin_only
+async def ogup_bluray_multi(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    query = update.callback_query
+    await query.answer()
+    new_value = _flip_ogup_bluray(context)
+    await query.edit_message_text(
+        "📹 کیفیت را انتخاب کن:",
+        reply_markup=quality_keyboard(
+            "ogup_mq:", "ogup_cancel", bluray=new_value
+        ),
+    )
+    return ONGOING_UPLOAD_MULTI_QUALITY

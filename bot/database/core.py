@@ -208,6 +208,10 @@ class CoreMixin:
                     "ALTER TABLE uploads "
                     "ADD COLUMN is_finished INTEGER DEFAULT 0"
                 ),
+                (
+                    "ALTER TABLE uploads "
+                    "ADD COLUMN is_bluray INTEGER DEFAULT 0"
+                ),
             )
 
             for migration in migrations:

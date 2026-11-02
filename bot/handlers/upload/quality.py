@@ -103,6 +103,20 @@ async def multiselect_callback(
         )
         return MULTI_QUALITY_CHANNEL
 
+    if data == "bluray_toggle":
+        # B20: تاگل بلوری برای همهٔ لینک‌های این آپلود
+        await query.answer()
+        new_value = 0 if context.user_data.get("is_bluray") else 1
+        context.user_data["is_bluray"] = new_value
+        selected_now = list(context.user_data.get("mq_selected") or [])
+        await query.edit_message_text(
+            MULTISELECT_PROMPT,
+            reply_markup=quality_multiselect_keyboard(
+                selected_now, bluray=new_value
+            ),
+        )
+        return MULTI_QUALITY
+
     # mqs:<index>
     await query.answer()
     try:
@@ -123,7 +137,9 @@ async def multiselect_callback(
     context.user_data["mq_selected"] = selected
     await query.edit_message_text(
         MULTISELECT_PROMPT,
-        reply_markup=quality_multiselect_keyboard(selected),
+        reply_markup=quality_multiselect_keyboard(
+            selected, bluray=context.user_data.get("is_bluray", 0)
+        ),
     )
     return MULTI_QUALITY
 

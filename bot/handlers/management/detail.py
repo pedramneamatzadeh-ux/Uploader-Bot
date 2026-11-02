@@ -119,6 +119,11 @@ async def show_link_detail(
     lines.extend(
         [
             f"📹 کیفیت: {link['quality']}",
+            (
+                "🖨 بلوری: بله ✅"
+                if link.get("is_bluray")
+                else "🖨 بلوری: خیر ❌"
+            ),
             f"🔢 محدوده پیام: {link['channel_msg_range']}",
             f"👤 ایجاد کننده: {link['admin_id']}",
             f"📅 تاریخ ایجاد: {fmt_tehran(link['created_at'])}",

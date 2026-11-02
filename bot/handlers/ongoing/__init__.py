@@ -59,6 +59,9 @@ from .upload import handle_ongoing_upload_select_callback
 from .upload import ongoing_multi_ask_more_callback
 from .upload import ongoing_multi_quality_callback
 from .upload import ongoing_single_quality_callback
+from .upload import ogup_bluray_mode
+from .upload import ogup_bluray_single
+from .upload import ogup_bluray_multi
 from .inputs import receive_ongoing_create_name
 from .inputs import receive_ongoing_create_part
 from .inputs import receive_ongoing_create_season
@@ -78,6 +81,9 @@ __all__ = [
     "ongoing_multi_ask_more_callback",
     "ongoing_multi_quality_callback",
     "ongoing_single_quality_callback",
+    "ogup_bluray_mode",
+    "ogup_bluray_single",
+    "ogup_bluray_multi",
     "receive_ongoing_create_name",
     "receive_ongoing_create_part",
     "receive_ongoing_create_season",

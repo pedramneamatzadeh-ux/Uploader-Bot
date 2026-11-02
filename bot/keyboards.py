@@ -8,7 +8,7 @@ from telegram import (
 )
 
 from .config import config
-from .constants import ALL_QUALITIES, SETTINGS_BUTTON
+from .constants import ALL_QUALITIES, QUALITY_ROWS, SETTINGS_BUTTON
 
 # ---------------------------------------------------------------------------
 # رنگ دکمه‌ها (Bot API 9.4 — style: primary/success/danger)
@@ -326,6 +326,7 @@ def db_select_page1_keyboard(
             ib(
                 f"🗄️ {entry['name']}",
                 callback_data=f"dbsel:{idx}",
+                style="primary",
             )
         ]
         for idx, entry in enumerate(databases)
@@ -337,6 +338,7 @@ def db_select_page1_keyboard(
                 ib(
                     "🗃️ دیتابیس‌های سفارشی ▶️",
                     callback_data="dbsel_pg2",
+                    style="success",
                 )
             ]
         )
@@ -356,6 +358,7 @@ def db_select_page2_keyboard(
             ib(
                 f"🗄️ {row['name']}",
                 callback_data=f"dbsel_c:{idx}",
+                style="primary",
             )
         ]
         for idx, row in enumerate(custom_databases)
@@ -478,18 +481,40 @@ def part_keyboard() -> InlineKeyboardMarkup:
 
 def quality_multiselect_keyboard(
     selected: List[str],
+    bluray: int = 0,
 ) -> InlineKeyboardMarkup:
     """کیبورد چندانتخابی کیفیت‌ها: ضربه = سلکت/آنسلت + «ثبت انتخاب‌ها»."""
-    keyboard = [
+    # B22: ردیف‌های کیفیت همان چیدمان QUALITY_ROWS (هر x265 با AV1
+    # هم‌ردیف). idx = جایگاه در ALL_QUALITIES (flat) ⇒ mqs:idx بدون تغییر.
+    keyboard = []
+    idx = 0
+    for row in QUALITY_ROWS:
+        buttons = []
+        for quality in row:
+            buttons.append(
+                ib(
+                    ("✅ " if quality in selected else "") + quality,
+                    callback_data=f"mqs:{idx}",
+                    style="primary",
+                )
+            )
+            idx += 1
+        keyboard.append(buttons)
+
+    # B20: تاگل بلوری — ضربه = تیک می‌خورد/برمی‌دارد
+    keyboard.append(
         [
             ib(
-                ("✅ " if quality in selected else "") + quality,
-                callback_data=f"mqs:{idx}",
+                (
+                    "✅ بلوری (Blu-ray)"
+                    if bluray
+                    else "🖨 بلوری (Blu-ray)"
+                ),
+                callback_data="bluray_toggle",
                 style="primary",
             )
         ]
-        for idx, quality in enumerate(ALL_QUALITIES)
-    ]
+    )
 
     keyboard.append(
         [
@@ -508,38 +533,36 @@ def quality_multiselect_keyboard(
 def quality_keyboard(
     prefix: str,
     cancel_callback: Optional[str] = None,
+    bluray: Optional[int] = None,
 ) -> InlineKeyboardMarkup:
+    """B19: ردیف‌ها از QUALITY_ROWS ساخته می‌شوند."""
     keyboard = [
         [
             ib(
-                "480p",
-                callback_data=f"{prefix}480p",
+                quality,
+                callback_data=f"{prefix}{quality}",
                 style="primary",
-            ),
-            ib(
-                "720p",
-                callback_data=f"{prefix}720p",
-                style="primary",
-            ),
-            ib(
-                "1080p",
-                callback_data=f"{prefix}1080p",
-                style="primary",
-            ),
-        ],
-        [
-            ib(
-                "720p x265",
-                callback_data=f"{prefix}720p x265",
-                style="primary",
-            ),
-            ib(
-                "1080p x265",
-                callback_data=f"{prefix}1080p x265",
-                style="primary",
-            ),
-        ],
+            )
+            for quality in row
+        ]
+        for row in QUALITY_ROWS
     ]
+
+    # B20: تاگل بلوری — فقط وقتی caller مقدار bluray بدهد
+    if bluray is not None:
+        keyboard.append(
+            [
+                ib(
+                    (
+                        "✅ بلوری (Blu-ray)"
+                        if bluray
+                        else "🖨 بلوری (Blu-ray)"
+                    ),
+                    callback_data="ogup_bluray",
+                    style="primary",
+                )
+            ]
+        )
 
     if cancel_callback:
         keyboard.append(
@@ -557,93 +580,55 @@ def quality_keyboard(
 def build_quality_edit_keyboard(
     session_id: str,
 ) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+    """B19: ردیف‌ها از QUALITY_ROWS ساخته می‌شوند."""
+    keyboard = [
         [
-            [
-                ib(
-                    "480p",
-                    callback_data=f"set_quality:480p:{session_id}",
-                    style="primary",
+            ib(
+                quality,
+                callback_data=(
+                    f"set_quality:{quality}:{session_id}"
                 ),
-                ib(
-                    "720p",
-                    callback_data=f"set_quality:720p:{session_id}",
-                    style="primary",
-                ),
-                ib(
-                    "1080p",
-                    callback_data=f"set_quality:1080p:{session_id}",
-                    style="primary",
-                ),
-            ],
-            [
-                ib(
-                    "720p x265",
-                    callback_data=(
-                        f"set_quality:720p x265:{session_id}"
-                    ),
-                    style="primary",
-                ),
-                ib(
-                    "1080p x265",
-                    callback_data=(
-                        f"set_quality:1080p x265:{session_id}"
-                    ),
-                    style="primary",
-                ),
-            ],
-            [
-                ib(
-                    "❌ لغو",
-                    callback_data=f"view_link:{session_id}",
-                )
-            ],
+                style="primary",
+            )
+            for quality in row
+        ]
+        for row in QUALITY_ROWS
+    ]
+    keyboard.append(
+        [
+            ib(
+                "❌ لغو",
+                callback_data=f"view_link:{session_id}",
+            )
         ]
     )
+    return InlineKeyboardMarkup(keyboard)
 
 
 def build_add_quality_keyboard(
     session_id: str,
 ) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+    """B19: ردیف‌ها از QUALITY_ROWS ساخته می‌شوند."""
+    keyboard = [
         [
-            [
-                ib(
-                    "480p",
-                    callback_data="aq_480p",
-                    style="primary",
-                ),
-                ib(
-                    "720p",
-                    callback_data="aq_720p",
-                    style="primary",
-                ),
-                ib(
-                    "1080p",
-                    callback_data="aq_1080p",
-                    style="primary",
-                ),
-            ],
-            [
-                ib(
-                    "720p x265",
-                    callback_data="aq_720p x265",
-                    style="primary",
-                ),
-                ib(
-                    "1080p x265",
-                    callback_data="aq_1080p x265",
-                    style="primary",
-                ),
-            ],
-            [
-                ib(
-                    "❌ لغو",
-                    callback_data=f"view_link:{session_id}",
-                )
-            ],
+            ib(
+                quality,
+                callback_data=f"aq_{quality}",
+                style="primary",
+            )
+            for quality in row
+        ]
+        for row in QUALITY_ROWS
+    ]
+    keyboard.append(
+        [
+            ib(
+                "❌ لغو",
+                callback_data=f"view_link:{session_id}",
+            )
         ]
     )
+    return InlineKeyboardMarkup(keyboard)
 
 
 def build_pagination_row(

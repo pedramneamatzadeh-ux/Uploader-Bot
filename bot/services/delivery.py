@@ -128,11 +128,19 @@ async def deliver_files_for_session(
     if sent_count:
         db.record_download(session_id, user.id)
 
+        # B20: نسخه بلوری — کاربر هم در پیام تحویل می‌بیند
+        bluray_line = (
+            "🖨 نسخه بلوری ✅\n"
+            if upload_data.get("is_bluray")
+            else ""
+        )
+
         if upload_data.get("anime_type") == "سینمایی":
             final_text = (
                 "✅ ارسال کامل شد!\n"
                 f"📥 {sent_count} فایل با کیفیت {upload_data['quality']} ارسال شد.\n"
                 "🏷️ نوع: سینمایی\n"
+                f"{bluray_line}"
                 f"🎬 {upload_data['anime_name']}\n"
                 f"🎞️ سینمایی شماره: {upload_data.get('season_num') or 'نامشخص'}"
             )
@@ -145,6 +153,7 @@ async def deliver_files_for_session(
             final_text = (
                 "✅ ارسال کامل شد!\n"
                 f"📥 {sent_count} فایل با کیفیت {upload_data['quality']} ارسال شد.\n"
+                f"{bluray_line}"
                 f"🎬 {upload_data['anime_name']}\n"
                 f"🎞️ فصل: {upload_data.get('season_num') or 'نامشخص'}\n"
                 f"{part_line}"

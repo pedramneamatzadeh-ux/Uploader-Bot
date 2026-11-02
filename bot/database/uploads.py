@@ -47,9 +47,10 @@ class UploadsMixin:
                     ongoing_anime_id,
                     anime_type,
                     channel_chat_id,
-                    airing_status
+                    airing_status,
+                    is_bluray
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -65,6 +66,7 @@ class UploadsMixin:
                     data.get("anime_type", ""),
                     channel_chat_id,
                     airing_status,
+                    int(data.get("is_bluray", 0) or 0),
                 ),
             )
 
@@ -84,7 +86,8 @@ class UploadsMixin:
                     channel_msg_range,
                     COALESCE(status, 'active') AS status,
                     COALESCE(anime_type, '') AS anime_type,
-                    channel_chat_id
+                    channel_chat_id,
+                    COALESCE(is_bluray, 0) AS is_bluray
                 FROM uploads
                 WHERE session_id = ?
                 """,
@@ -116,7 +119,8 @@ class UploadsMixin:
                     COALESCE(anime_type, '') AS anime_type,
                     channel_chat_id,
                     airing_status,
-                    COALESCE(is_finished, 0) AS is_finished
+                    COALESCE(is_finished, 0) AS is_finished,
+                    COALESCE(is_bluray, 0) AS is_bluray
                 FROM uploads
                 WHERE session_id = ?
                 """,
@@ -363,3 +367,100 @@ class UploadsMixin:
             )
 
             return cursor.rowcount
+
+    def get_group_bluray(
+        self,
+        anime_name: str,
+        season_num: Optional[str],
+        part_num: Optional[str],
+        episode_range: Optional[str] = None,
+    ) -> int:
+        """B20/B22: وضعیت بلوری گروه — اگر حتی یک لینک بلوری باشد ۱.
+
+        با episode_range فقط لینک‌های همان اپیزود بررسی می‌شوند
+        (None = کل فصل/پارت/سینمایی).
+        """
+        sql = """
+            SELECT COALESCE(MAX(is_bluray), 0) AS bl
+            FROM uploads
+            WHERE
+                anime_name = ?
+                AND COALESCE(season_num, '') = COALESCE(?, '')
+                AND COALESCE(part_num, '') = COALESCE(?, '')
+        """
+        params: list = [anime_name, season_num, part_num]
+        if episode_range is not None:
+            sql += " AND COALESCE(episode_range, '') = ?"
+            params.append(episode_range)
+        with self.connect() as connection:
+            row = connection.execute(sql, tuple(params)).fetchone()
+
+            return int(row["bl"]) if row else 0
+
+    def set_group_bluray(
+        self,
+        anime_name: str,
+        season_num: Optional[str],
+        part_num: Optional[str],
+        is_bluray: int,
+        episode_range: Optional[str] = None,
+    ) -> int:
+        """B20/B22: لینک‌های هم‌نام+هم‌فصل+هم‌پارت را بلوری/غیربلوری
+        می‌کند (دوطرفه). با episode_range فقط همان اپیزود.
+        تعداد لینک‌های تغییرکرده را برمی‌گرداند."""
+        sql = """
+            UPDATE uploads
+            SET is_bluray = ?
+            WHERE
+                anime_name = ?
+                AND COALESCE(season_num, '') = COALESCE(?, '')
+                AND COALESCE(part_num, '') = COALESCE(?, '')
+        """
+        params: list = [int(is_bluray), anime_name, season_num, part_num]
+        if episode_range is not None:
+            sql += " AND COALESCE(episode_range, '') = ?"
+            params.append(episode_range)
+        with self.connect() as connection:
+            cursor = connection.execute(sql, tuple(params))
+
+            return cursor.rowcount
+
+    def get_quality_counts(self) -> List[Dict[str, Any]]:
+        """R13: تعداد لینک‌ها به تفکیک کیفیت (نزولی)."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    COALESCE(quality, '') AS quality,
+                    COUNT(*) AS cnt
+                FROM uploads
+                GROUP BY COALESCE(quality, '')
+                ORDER BY COUNT(*) DESC
+                """
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def get_stats_groups(self) -> List[Dict[str, Any]]:
+        """R13: گروه‌های فیزیکی (نام، فصل، پارت، نوع) با تعداد لینک
+        و وضعیت بلوری — برای آمار دیتابیس."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    anime_name,
+                    COALESCE(season_num, '') AS season_num,
+                    COALESCE(part_num, '') AS part_num,
+                    COALESCE(anime_type, '') AS anime_type,
+                    COUNT(*) AS cnt,
+                    COALESCE(MAX(is_bluray), 0) AS bluray
+                FROM uploads
+                GROUP BY
+                    anime_name,
+                    COALESCE(season_num, ''),
+                    COALESCE(part_num, ''),
+                    COALESCE(anime_type, '')
+                """
+            ).fetchall()
+
+        return [dict(row) for row in rows]

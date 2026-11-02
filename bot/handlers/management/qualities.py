@@ -142,6 +142,28 @@ async def show_quality_list(
             ]
         )
 
+    # B22: تاگل بلوری — دامنه فقط اپیزود انتخاب‌شده (سینمایی: کل فیلم)
+    # و «افزودن کیفیت جدید» بالای آن است.
+    _bluray_on = db.get_group_bluray(
+        manage.get("name") or "",
+        manage.get("season") or "",
+        manage.get("part") or "",
+        episode_range=manage.get("episode"),
+    )
+    keyboard.append(
+        [
+            ib(
+                (
+                    "🖨 بلوری: ✅ هست"
+                    if _bluray_on
+                    else "🖨 بلوری: ❌ نیست"
+                ),
+                callback_data="mg_bluray_ep",
+                style="primary",
+            )
+        ]
+    )
+
     keyboard.append(
         [
             ib("◀️ بازگشت", callback_data="mg_back"),

@@ -1,12 +1,13 @@
 import html
 import logging
+import os
 
 from telegram import InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ..config import config
-from ..constants import MANAGE_STATS, Msg
+from ..constants import ALL_QUALITIES, MANAGE_STATS, Msg
 from ..database import db
 from ..decorators import admin_only
 from ..keyboards import build_pagination_row, ib
@@ -68,6 +69,7 @@ async def show_stats_menu(
             ib("📅 دوره‌ای", callback_data="stats_periods"),
             ib("🔴 گزارش‌ها", callback_data="stats_reports"),
         ],
+        [ib("🗂️ آمار دیتابیس", callback_data="stats_db")],
         [ib("🏠 بازگشت به منوی اصلی", callback_data="stats_back_main")],
     ]
     await safe_edit_or_send(
@@ -516,15 +518,26 @@ async def _resolve_report(
 
     notified = False
     if report:
-        title = format_anime_title(
-            report["anime_name"],
-            report.get("season_num"),
-            report.get("part_num"),
-            report.get("anime_type"),
-            display=_display_for_row(report),
-        )
+        # B21: اطلاع مرتب با جزئیات کامل — نام/فصل/پارت/قسمت/کیفیت
+        name = _display_for_row(report) or report["anime_name"]
+        detail_lines = [f"🎬 «{name}»"]
+        season = (report.get("season_num") or "").strip()
+        part = (report.get("part_num") or "").strip()
+        if season:
+            if (report.get("anime_type") or "") == "سینمایی":
+                detail_lines.append(f"📽 سینمایی شماره {season}")
+            else:
+                season_line = f"📚 فصل {season}"
+                if part:
+                    season_line += f" | پارت {part}"
+                detail_lines.append(season_line)
+        episode_range = (report.get("episode_range") or "").strip()
+        # برای سینمایی، episode_range placeholder («1») است — نشان نده
+        if episode_range and (report.get("anime_type") or "") != "سینمایی":
+            detail_lines.append(f"📺 قسمت: {episode_range}")
+        detail_lines.append(f"🎞 کیفیت: {report['quality']}")
         notice = Msg.REPORT_RESOLVED_NOTICE.format(
-            title=f"{title} ({report['quality']})"
+            details="\n".join(detail_lines)
         )
         # R8f: لینک دانلود همان جلسه گزارش‌شده — کاربر با یک
         # ضربه فایل‌ها را دوباره دریافت می‌کند.
@@ -564,6 +577,264 @@ async def _resolve_report(
     )
 
 
+# ============================================================================
+# R13 — آمار دیتابیس: کارت مرور + لیست‌های جزئیات
+# ============================================================================
+_DB_LIST_PAGE_SIZE = 10
+
+
+def _db_group_label(name, season, part, is_cinema):
+    """برچسب گروه برای لیست‌های آمار (HTML-escape شده)."""
+    name = html.escape(name or "")
+    season = html.escape(str(season or "").strip())
+    part = html.escape(str(part or "").strip())
+    if is_cinema:
+        return f"«{name}» — سینمایی شماره {season or 'نامشخص'}"
+    label = f"«{name}» — فصل {season or 'نامشخص'}"
+    if part:
+        label += f" | پارت {part}"
+    return label
+
+
+def _db_sort_key(key):
+    name, season, part, _is_cinema = key
+    return (
+        name,
+        int(season) if season.isdigit() else 0,
+        int(part) if part.isdigit() else 0,
+        part,
+    )
+
+
+def _db_stats_collect():
+    """گروه‌های فیزیکی را با نام ظاهری مؤثر ادغام می‌کند (R12).
+
+    خروجی: dict با کلیدهای groups/series/movies/bluray.
+    """
+    groups = {}
+    for row in db.get_stats_groups():
+        display = db.get_display_for(
+            row["anime_name"], row["season_num"], row["part_num"]
+        )
+        is_cinema = (row["anime_type"] or "") == "سینمایی"
+        key = (
+            display,
+            (row["season_num"] or "").strip(),
+            (row["part_num"] or "").strip(),
+            is_cinema,
+        )
+        item = groups.setdefault(key, {"links": 0, "bluray": 0})
+        item["links"] += row["cnt"]
+        item["bluray"] = max(item["bluray"], int(row["bluray"] or 0))
+
+    bluray = [(k, groups[k]) for k in groups if groups[k]["bluray"]]
+    bluray.sort(key=lambda kv: _db_sort_key(kv[0]))
+    return {
+        "groups": groups,
+        "series": [k for k in groups if not k[3]],
+        "movies": [k for k in groups if k[3]],
+        "bluray": bluray,
+    }
+
+
+async def show_db_stats(chat_id, context, message_id=None):
+    """R13: کارت مرور آمار دیتابیس — همهٔ اعداد کلیدی در یک نگاه."""
+    data = _db_stats_collect()
+    total_links = db.count_all_uploads()
+    n_air = db.count_ongoing_animes(active_only=True)
+    n_fin = db.count_ongoing_animes() - n_air
+    db_label = html.escape(
+        os.path.basename(getattr(db, "path", "") or "") or "دیتابیس"
+    )
+
+    text = (
+        f"📊 <b>آمار دیتابیس</b> — <code>{db_label}</code>\n\n"
+        f"🔗 کل لینک‌ها: <b>{total_links}</b>\n\n"
+        f"📚 فصل/پارت (سریالی): <b>{len(data['series'])}</b>\n"
+        f"🎬 آثار سینمایی: <b>{len(data['movies'])}</b>\n"
+        f"🖨 گروه‌های بلوری: <b>{len(data['bluray'])}</b>\n\n"
+        f"📮 پست‌ها: <b>{db.count_all_posts()}</b>\n"
+        f"📺 درحال پخش: <b>{n_air}</b>\n"
+        f"🏁 اتمام پخش: <b>{n_fin}</b>\n\n"
+        "<i>گروه‌ها بر مبنای نام ظاهری شمرده شده‌اند.</i>"
+    )
+
+    keyboard = [
+        [ib("🎞 لینک هر کیفیت", callback_data="stats_db_qual")],
+        [
+            ib(
+                f"🖨 لیست بلوری‌ها ({len(data['bluray'])})",
+                callback_data="stats_db_bluray",
+            )
+        ],
+        [
+            ib(
+                f"📺 درحال پخش ({n_air})",
+                callback_data="stats_db_air",
+            ),
+            ib(
+                f"🏁 اتمام پخش ({n_fin})",
+                callback_data="stats_db_fin",
+            ),
+        ],
+        [
+            ib("🔄 تازه‌سازی", callback_data="stats_db"),
+            ib("◀️ بازگشت", callback_data="stats_back"),
+        ],
+    ]
+
+    await safe_edit_or_send(
+        context,
+        chat_id,
+        text,
+        InlineKeyboardMarkup(keyboard),
+        message_id,
+        parse_mode="HTML",
+    )
+
+
+async def show_db_quality_stats(chat_id, context, message_id=None):
+    """R13: تعداد لینک هر کیفیت — ترتیب منوی کیفیت + درصد."""
+    counts = db.get_quality_counts()
+    total = sum(row["cnt"] for row in counts)
+    by_quality = {
+        (row["quality"] or "نامشخص"): row["cnt"] for row in counts
+    }
+
+    lines = [f"🎞 <b>لینک‌ها بر اساس کیفیت</b> — کل: {total}\n"]
+    idx = 1
+    for quality in ALL_QUALITIES:
+        cnt = by_quality.pop(quality, 0)
+        pct = f"{round(cnt * 100 / total)}%" if total else "—"
+        lines.append(
+            f"{idx}. {html.escape(quality)}: <b>{cnt}</b> ({pct})"
+        )
+        idx += 1
+    # مقدار‌های خارج از منو (قدیمی) — نزولی بر اساس تعداد
+    for quality, cnt in sorted(by_quality.items(), key=lambda kv: -kv[1]):
+        pct = f"{round(cnt * 100 / total)}%" if total else "—"
+        lines.append(
+            f"{idx}. {html.escape(quality)}: <b>{cnt}</b> ({pct})"
+        )
+        idx += 1
+
+    keyboard = [
+        [ib("◀️ بازگشت", callback_data="stats_db")],
+    ]
+    await safe_edit_or_send(
+        context,
+        chat_id,
+        "\n".join(lines),
+        InlineKeyboardMarkup(keyboard),
+        message_id,
+        parse_mode="HTML",
+    )
+
+
+async def _show_db_paged_list(
+    chat_id,
+    context,
+    title,
+    prefix,
+    items,
+    page=0,
+    message_id=None,
+):
+    """صفحه‌بندی مشترک لیست‌های آمار دیتابیس (R13)."""
+    total = len(items)
+    pages = max(
+        1, (total + _DB_LIST_PAGE_SIZE - 1) // _DB_LIST_PAGE_SIZE
+    )
+    page = max(0, min(page, pages - 1))
+    start = page * _DB_LIST_PAGE_SIZE
+    chunk = items[start:start + _DB_LIST_PAGE_SIZE]
+
+    lines = [f"{title} — {total}\n"]
+    if not chunk:
+        lines.append("موردی یافت نشد. 😕")
+    for idx, (label, extra) in enumerate(chunk, start=start + 1):
+        suffix = f" ({extra})" if extra else ""
+        lines.append(f"{idx}. {label}{suffix}")
+    if pages > 1:
+        lines.append(f"\n📄 صفحه {page + 1} از {pages}")
+
+    keyboard = [
+        build_pagination_row(
+            page,
+            pages,
+            f"{prefix}:{page - 1}",
+            prefix,
+            f"{prefix}:{page + 1}",
+        ),
+        [ib("◀️ بازگشت", callback_data="stats_db")],
+    ]
+    await safe_edit_or_send(
+        context,
+        chat_id,
+        "\n".join(lines),
+        InlineKeyboardMarkup(keyboard),
+        message_id,
+        parse_mode="HTML",
+    )
+
+
+async def show_db_bluray_list(chat_id, context, page=0, message_id=None):
+    """R13: فهرست گروه‌های بلوری (فصل/پارت/سینمایی)."""
+    items = _db_stats_collect()["bluray"]
+    await _show_db_paged_list(
+        chat_id,
+        context,
+        title="🖨 <b>گروه‌های بلوری</b>",
+        prefix="stats_db_bluray",
+        items=[
+            (
+                _db_group_label(key[0], key[1], key[2], key[3]),
+                f"{item['links']} لینک",
+            )
+            for key, item in items
+        ],
+        page=page,
+        message_id=message_id,
+    )
+
+
+async def show_db_ongoing_list(
+    chat_id,
+    context,
+    status,
+    page=0,
+    message_id=None,
+):
+    """R13: فهرست انیمه‌های درحال پخش / اتمام‌یافته."""
+    rows = db.get_ongoing_by_status(status)
+    if status == "active":
+        title = "📺 <b>انیمه‌های درحال پخش</b>"
+        prefix = "stats_db_air"
+    else:
+        title = "🏁 <b>انیمه‌های اتمام‌یافته/غیرفعال</b>"
+        prefix = "stats_db_fin"
+    await _show_db_paged_list(
+        chat_id,
+        context,
+        title=title,
+        prefix=prefix,
+        items=[
+            (
+                _db_group_label(
+                    row["anime_name"],
+                    row.get("season_num"),
+                    row.get("part_num"),
+                    False,
+                ),
+                None,
+            )
+            for row in rows
+        ],
+        page=page,
+        message_id=message_id,
+    )
+
+
 @admin_only
 async def handle_stats_callback(
     update: Update,
@@ -596,6 +867,23 @@ async def handle_stats_callback(
     elif data.startswith("stats_top_page:"):
         await show_top_anime_stats(
             chat_id, context, int(data.split(":")[1]), message_id
+        )
+    elif data == "stats_db":
+        await show_db_stats(chat_id, context, message_id)
+    elif data == "stats_db_qual":
+        await show_db_quality_stats(chat_id, context, message_id)
+    elif data.startswith("stats_db_bluray"):
+        page = int(data.split(":")[1]) if ":" in data else 0
+        await show_db_bluray_list(chat_id, context, page, message_id)
+    elif data.startswith("stats_db_air"):
+        page = int(data.split(":")[1]) if ":" in data else 0
+        await show_db_ongoing_list(
+            chat_id, context, "active", page, message_id
+        )
+    elif data.startswith("stats_db_fin"):
+        page = int(data.split(":")[1]) if ":" in data else 0
+        await show_db_ongoing_list(
+            chat_id, context, "inactive", page, message_id
         )
     elif data == "stats_periods":
         await show_periods_menu(chat_id, context, message_id)

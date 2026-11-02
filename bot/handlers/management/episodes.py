@@ -145,6 +145,26 @@ async def show_episode_list(
         ]
     )
 
+    # B20: تاگل بلوری گروهی (همهٔ لینک‌های این فصل/پارت/سینمایی)
+    _bluray_on = db.get_group_bluray(
+        manage.get("name") or "",
+        manage.get("season") or "",
+        manage.get("part") or "",
+    )
+    keyboard.append(
+        [
+            ib(
+                (
+                    "🖨 بلوری: ✅ هست"
+                    if _bluray_on
+                    else "🖨 بلوری: ❌ نیست"
+                ),
+                callback_data="mg_bluray",
+                style="primary",
+            )
+        ]
+    )
+
     keyboard.append(
         [
             ib("◀️ بازگشت", callback_data="mg_back"),

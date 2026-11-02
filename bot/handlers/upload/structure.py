@@ -82,7 +82,9 @@ async def movie_num_callback(
     await context.bot.send_message(
         chat_id=query.from_user.id,
         text=MULTISELECT_PROMPT,
-        reply_markup=quality_multiselect_keyboard([]),
+        reply_markup=quality_multiselect_keyboard(
+            [], bluray=context.user_data.get("is_bluray", 0)
+        ),
     )
     return MULTI_QUALITY
 
@@ -113,7 +115,9 @@ async def receive_movie_num(
 
     await update.message.reply_text(
         MULTISELECT_PROMPT,
-        reply_markup=quality_multiselect_keyboard([]),
+        reply_markup=quality_multiselect_keyboard(
+            [], bluray=context.user_data.get("is_bluray", 0)
+        ),
     )
     return MULTI_QUALITY
 
@@ -283,6 +287,8 @@ async def receive_episode_range(
 
     await update.message.reply_text(
         MULTISELECT_PROMPT,
-        reply_markup=quality_multiselect_keyboard([]),
+        reply_markup=quality_multiselect_keyboard(
+            [], bluray=context.user_data.get("is_bluray", 0)
+        ),
     )
     return MULTI_QUALITY

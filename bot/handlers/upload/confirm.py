@@ -89,6 +89,9 @@ async def show_upload_confirm(
             f"📺 قسمت‌ها: {base.get('episode_range') or 'نامشخص'}"
         )
 
+    lines.append(
+        f"🖨 بلوری: {'✅ بله' if base.get('is_bluray') else '❌ خیر'}"
+    )
     lines.append("")
     lines.append("کیفیت‌ها:")
     for idx, item in enumerate(base.get("qualities") or [], 1):
@@ -209,6 +212,7 @@ async def confirm_upload(
             "anime_type": base.get("anime_type", ""),
             "channel_chat_id": channel_chat_id,
             "airing_status": base.get("airing_status"),
+            "is_bluray": 1 if base.get("is_bluray") else 0,
         }
 
         try:

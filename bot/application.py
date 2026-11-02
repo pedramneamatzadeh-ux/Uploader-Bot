@@ -102,6 +102,9 @@ from .handlers.ongoing import (
     ongoing_multi_ask_more_callback,
     ongoing_multi_quality_callback,
     ongoing_single_quality_callback,
+    ogup_bluray_mode,
+    ogup_bluray_single,
+    ogup_bluray_multi,
     receive_ongoing_create_name,
     receive_ongoing_create_part,
     receive_ongoing_create_season,
@@ -223,7 +226,10 @@ def _build_upload_conversation() -> ConversationHandler:
             MULTI_QUALITY: [
                 CallbackQueryHandler(
                     multiselect_callback,
-                    pattern=r"^(mqs:\d+|mqs_go|mqs_cancel)$",
+                    pattern=(
+                        r"^(mqs:\d+|mqs_go|mqs_cancel"
+                        r"|bluray_toggle)$"
+                    ),
                 )
             ],
             # پرسش محدوده پیام هر کیفیت، به ترتیب انتخاب
@@ -306,11 +312,19 @@ def _build_ongoing_conversation(quality_pattern: str) -> ConversationHandler:
                     handle_ongoing_upload_mode_callback,
                     pattern=r"^(ogup_mode:(std3|multi|single)|ogup_cancel)$",
                 ),
+                CallbackQueryHandler(
+                    ogup_bluray_mode,
+                    pattern="^ogup_bluray$",
+                ),
             ],
             ONGOING_UPLOAD_SINGLE_QUALITY: [
                 CallbackQueryHandler(
                     ongoing_single_quality_callback,
                     pattern=f"^(ogup_q:({quality_pattern})|ogup_cancel)$",
+                ),
+                CallbackQueryHandler(
+                    ogup_bluray_single,
+                    pattern="^ogup_bluray$",
                 ),
             ],
             ONGOING_UPLOAD_SINGLE_RANGE: [
@@ -323,6 +337,10 @@ def _build_ongoing_conversation(quality_pattern: str) -> ConversationHandler:
                 CallbackQueryHandler(
                     ongoing_multi_quality_callback,
                     pattern=f"^(ogup_mq:({quality_pattern})|ogup_cancel)$",
+                ),
+                CallbackQueryHandler(
+                    ogup_bluray_multi,
+                    pattern="^ogup_bluray$",
                 ),
             ],
             ONGOING_UPLOAD_MULTI_RANGE: [
@@ -398,7 +416,10 @@ def _build_management_conversation() -> ConversationHandler:
             MULTI_QUALITY: [
                 CallbackQueryHandler(
                     multiselect_callback,
-                    pattern=r"^(mqs:\d+|mqs_go|mqs_cancel)$",
+                    pattern=(
+                        r"^(mqs:\d+|mqs_go|mqs_cancel"
+                        r"|bluray_toggle)$"
+                    ),
                 ),
             ],
             MULTI_QUALITY_CHANNEL: [

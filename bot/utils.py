@@ -133,11 +133,12 @@ def validate_episode_input(text: Optional[str]) -> Tuple[bool, str]:
         ):
             return (
                 False,
-                "فرمت محدوده نامعتبر است. مثال صحیح: 1-12",
+                "فرمت محدوده نامعتبر است. مثال صحیح: 1-12 یا 0-12",
             )
 
         start, end = int(parts[0]), int(parts[1])
-        if start <= 0 or end <= 0 or end < start:
+        # B17: اپیزود 0 معتبر است (برخی انیمه‌ها قسمت 0/OVA دارند)
+        if start < 0 or end < 0 or end < start:
             return False, "محدوده قسمت نامعتبر است."
 
     elif not clean_text.isdigit():
