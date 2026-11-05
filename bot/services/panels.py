@@ -20,6 +20,8 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ..constants import SETTINGS_BUTTON
+from ..constants import Msg
+from ..utils import PANEL_MSG_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,26 @@ async def panel_gate(
     user = update.effective_user
     if not chat or not user:
         return
+
+    # R15: پنل قبلی باید واقعاً بسته شود — پیام(های) ثبت‌شده‌اش به
+    # «🚫 پنل بسته شد.» ویرایش می‌شوند و همهٔ دکمه‌ها حذف می‌شوند.
+    # خطای ویرایش (پیام حذف‌شده/خیلی قدیمی) هرگز جلوی پنل جدید را
+    # نمی‌گیرد.
+    try:
+        tracked = context.chat_data.pop(PANEL_MSG_KEY, None) or []
+    except (AttributeError, TypeError):
+        tracked = []
+    for mid in tracked:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat.id,
+                message_id=mid,
+                text=Msg.PANEL_CLOSED,
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+
     close_panels_for(context, chat.id, user.id)
 
 

@@ -245,10 +245,23 @@ class DisplayMixin:
         """R12-2: همه گروه‌های سطح ۱ (بدون صفحه‌بندی)."""
         return self._display_name_rows(term, sort)
 
+    def get_l1_entry_for(self, anime_name: str) -> Optional[Dict[str, Any]]:
+        """R16: ردیف سطح ۱ (نام ظاهری + اعضا) که این نام واقعی در آن است.
+
+        برای «پرش مستقیم» جستجو به فصل/پارت/سینمایی؛ None یعنی یتیم.
+        """
+        if not anime_name:
+            return None
+        for group in self._display_name_rows():
+            if anime_name in (group.get("names") or []):
+                return group
+        return None
+
     def _display_name_rows(
         self,
         term: Optional[str] = None,
         sort: str = "alpha",
+        all_extras: bool = True,
     ) -> List[Dict[str, Any]]:
         """سطح ۱ (R12-2): گروه‌بندی بر اساس نام ظاهری *مؤثر* به‌ازای
         هر (نام واقعی، نوع، فصل، پارت).
@@ -410,12 +423,23 @@ class DisplayMixin:
 
         if term:
             needle = term.lower()
+            # R16: اسم‌های جستجوی اضافی هم والد خود را بالا می‌آورند —
+            # all_extras=False فقط دامنهٔ «انیمه» را حساب می‌کند (مبنای
+            # تصمیم «پرش مستقیم» در handle_search_input).
+            extra_hit_names = {
+                row["anime_name"]
+                for row in self.search_extra_names(needle)
+                if all_extras or row["scope"] == "anime"
+            }
             result = [
                 group
                 for group in result
                 if needle in group["display_name"].lower()
                 or any(
                     needle in name.lower() for name in group["names"]
+                )
+                or any(
+                    name in extra_hit_names for name in group["names"]
                 )
             ]
 

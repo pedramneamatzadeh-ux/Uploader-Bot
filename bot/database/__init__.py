@@ -18,6 +18,7 @@ from .users import UsersMixin
 from .uploads import UploadsMixin
 from .display import DisplayMixin
 from .groups import GroupsMixin
+from .extra_names import ExtraNamesMixin
 from .ongoingdb import OngoingMixin
 from .postsdb import PostsMixin
 from .custom_db import CustomDbMixin
@@ -31,6 +32,7 @@ class Database(
     UploadsMixin,
     DisplayMixin,
     GroupsMixin,
+    ExtraNamesMixin,
     OngoingMixin,
     PostsMixin,
     CustomDbMixin,

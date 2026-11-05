@@ -120,6 +120,16 @@ def parse_range(rng: Optional[str]) -> Optional[Tuple[int, int]]:
     return start, end
 
 
+def count_range_messages(rng: Optional[str]) -> int:
+    """R14: تعداد پیام‌های (فایل‌های) یک بازه — «803-813» = ۱۱، «100» = ۱."""
+    parsed = parse_range(rng)
+    if not parsed:
+        return 0
+
+    start, end = parsed
+    return end - start + 1
+
+
 def validate_episode_input(text: Optional[str]) -> Tuple[bool, str]:
     clean_text = normalize_digits((text or "").strip())
 
@@ -286,7 +296,13 @@ JALALI_MONTH_NAMES = (
     "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
 )
 
-PERIOD_TITLES = {"w": "هفتگی", "m": "ماهانه", "y": "سالانه"}
+# R14: «d» = روزانه (فقط آمار آپلود؛ منوی دوره‌ای R8d همان w/m/y است)
+PERIOD_TITLES = {
+    "d": "روزانه",
+    "w": "هفتگی",
+    "m": "ماهانه",
+    "y": "سالانه",
+}
 
 
 def _jalali_to_gregorian(jy: int, jm: int, jd: int) -> Tuple[int, int, int]:
@@ -367,7 +383,23 @@ def period_boundaries(
     local = now.astimezone(_TEHRAN_TZ)
     jy, jm, jd = _gregorian_to_jalali(local.year, local.month, local.day)
 
-    if period == "w":
+    if period == "d":
+        # R14: روزانه — از نیمه‌شب تهرانِ امروز؛ قبل = دیروز
+        start_local = local.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        prev_start_local = start_local - timedelta(days=1)
+        py, pm, pd = _gregorian_to_jalali(
+            prev_start_local.year,
+            prev_start_local.month,
+            prev_start_local.day,
+        )
+        # R15: هدر دوره خودش «امروز» دارد — لیبل فقط تاریخ
+        label = f"{jy:04d}/{jm:02d}/{jd:02d}"
+        prev_label = f"دیروز {py:04d}/{pm:02d}/{pd:02d}"
+        start = _local_to_utc_str(start_local)
+        prev_start = _local_to_utc_str(prev_start_local)
+    elif period == "w":
         # شنبه = weekday 5 در پایتون؛ فاصلهٔ امروز تا شنبهٔ جاری
         days_since_saturday = (local.weekday() - 5) % 7
         start_local = (local - timedelta(days=days_since_saturday)).replace(
@@ -508,6 +540,29 @@ async def build_download_link(
     return f"https://t.me/{username}?start={session_id}"
 
 
+# کلید فهرست پیام‌های پنل‌های باز در chat_data (R15: بستن واقعی پنل قبلی).
+PANEL_MSG_KEY = "_panel_msgs"
+
+
+def register_panel_message(context: ContextTypes.DEFAULT_TYPE, message_id) -> None:
+    """پیام یک پنل را برای «بستن واقعی» هنگام باز شدن پنل بعدی ثبت می‌کند.
+
+    در chat_data نگه داشته می‌شود (نه user_data) تا پاک‌شدن state گفتگو
+    آن را از بین نبرد. هیچ‌وقت استثنا نمی‌دهد.
+    """
+    if not message_id:
+        return
+    try:
+        lst = context.chat_data.setdefault(PANEL_MSG_KEY, [])
+        if message_id in lst:
+            return
+        lst.append(message_id)
+        if len(lst) > 5:
+            del lst[:-5]
+    except (AttributeError, TypeError):
+        pass  # contextهای تستی/خاص بدون chat_data
+
+
 async def safe_edit_or_send(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -541,6 +596,7 @@ async def safe_edit_or_send(
         parse_mode=parse_mode,
     )
 
+    register_panel_message(context, sent.message_id)
     return sent.message_id
 
 
@@ -552,6 +608,11 @@ async def go_to_main_menu(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
 ) -> None:
+    # بازگشت به منوی اصلی = پایان آرام پنل‌ها؛ چیزی برای بستن نمی‌ماند
+    try:
+        context.chat_data.pop(PANEL_MSG_KEY, None)
+    except (AttributeError, TypeError):
+        pass
     await context.bot.send_message(
         chat_id=chat_id,
         text=Msg.MAIN_MENU_PROMPT,

@@ -28,7 +28,7 @@ from ...constants import (
 from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
-    CANCEL_MENU,
+    UPLOAD_CANCEL_INLINE,
     airing_status_keyboard,
     anime_type_keyboard,
     db_select_page1_keyboard,
@@ -43,6 +43,7 @@ from ...utils import (
     build_download_link,
     get_default_channel_chat_id,
     go_to_main_menu,
+    register_panel_message,
     normalize_digits,
     normalize_optional_text,
     validate_anime_name,
@@ -51,7 +52,14 @@ from ...utils import (
 )
 
 from .cancel import cancel_upload
-from .common import CANCEL_TEXT, _send_movie_question, _send_season_question
+from .common import (
+    CANCEL_TEXT,
+    _send_movie_question,
+    _send_season_question,
+    close_question_message,
+    delete_answer_message,
+    set_question_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +87,13 @@ async def receive_airing_status(
     context.user_data["airing_status"] = value
 
     await query.edit_message_text(f"✅ وضعیت پخش: {value}")
-    await context.bot.send_message(
+    sent = await context.bot.send_message(
         chat_id=query.from_user.id,
         text="این انیمه سینمایی است یا سریالی؟",
         reply_markup=anime_type_keyboard(),
     )
+    register_panel_message(context, sent.message_id)
+    set_question_message(context, sent.message_id)
     return ANIME_TYPE
 
 
@@ -107,16 +117,24 @@ async def receive_anime_type(
     elif text == "📺 سریالی":
         context.user_data["anime_type"] = "سریالی"
     else:
-        await update.message.reply_text(
+        sent = await update.message.reply_text(
             "❌ لطفاً یکی از گزینه‌ها را انتخاب کن:",
             reply_markup=anime_type_keyboard(),
         )
+        register_panel_message(context, sent.message_id)
         return ANIME_TYPE
 
-    await update.message.reply_text(
-        f"✅ نوع: {text}\n\nاسم انیمه را وارد کن: (فقط حروف انگلیسی)",
-        reply_markup=CANCEL_MENU,
+    # R18: سؤال نوع بسته می‌شود («✅ ثبت شد: …» بدون دکمه)
+    await close_question_message(
+        context, update.message.chat_id, context.user_data["anime_type"]
     )
+    sent = await update.message.reply_text(
+        f"✅ نوع: {text}\n\nاسم انیمه را وارد کن: (فقط حروف انگلیسی)",
+        reply_markup=UPLOAD_CANCEL_INLINE,
+    )
+    register_panel_message(context, sent.message_id)
+    set_question_message(context, sent.message_id)
+    await delete_answer_message(context, update.message)
     return ANIME_NAME
 
 
@@ -154,11 +172,13 @@ async def receive_anime_type_callback(
     context.user_data["anime_type"] = value
 
     await query.edit_message_text(f"✅ نوع: {value}")
-    await context.bot.send_message(
+    sent = await context.bot.send_message(
         chat_id=query.from_user.id,
         text="اسم انیمه را وارد کن: (فقط حروف انگلیسی)",
-        reply_markup=CANCEL_MENU,
+        reply_markup=UPLOAD_CANCEL_INLINE,
     )
+    register_panel_message(context, sent.message_id)
+    set_question_message(context, sent.message_id)
     return ANIME_NAME
 
 
@@ -178,15 +198,21 @@ async def receive_anime_name(
     if not valid:
         await update.message.reply_text(
             f"❌ {error}",
-            reply_markup=CANCEL_MENU,
+            reply_markup=UPLOAD_CANCEL_INLINE,
         )
         return ANIME_NAME
 
     context.user_data["anime_name"] = text
 
+    # R18: سؤال اسم بسته می‌شود؛ بعد از ارسال سؤال بعدی، پیام جواب
+    # کاربر پاک می‌شود (reply به پیامِ حذف‌شده در Bot API خطا می‌دهد).
+    await close_question_message(context, update.message.chat_id, text)
+
     if context.user_data.get("anime_type") == "سینمایی":
-        await _send_movie_question(update.message)
+        await _send_movie_question(update.message, context)
+        await delete_answer_message(context, update.message)
         return MOVIE_NUM
 
-    await _send_season_question(update.message)
+    await _send_season_question(update.message, context)
+    await delete_answer_message(context, update.message)
     return SEASON_NUM

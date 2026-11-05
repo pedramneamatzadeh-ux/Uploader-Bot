@@ -43,6 +43,14 @@ class SummariesMixin:
                 ).fetchone()
             return dict(row) if row else None
 
+    def count_season_summaries(self) -> int:
+        """شمار کل رکوردهای خلاصهٔ داستان (R15: کارت آمار دیتابیس)."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM season_summaries"
+            ).fetchone()
+            return int(row[0]) if row else 0
+
     def get_season_summary_by_id(
         self,
         summary_id: int,

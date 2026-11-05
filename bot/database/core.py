@@ -26,6 +26,8 @@ class CoreMixin:
         connection.execute("PRAGMA foreign_keys = ON")
         # P14: اگر نوشتن دیگری قفل را نگه داشت، تا ۵ ثانیه صبر کن
         connection.execute("PRAGMA busy_timeout = 5000")
+        # R14: با WAL، حالت NORMAL امن است و fsync بسیار کمتری دارد
+        connection.execute("PRAGMA synchronous = NORMAL")
 
         try:
             yield connection
@@ -129,6 +131,21 @@ class CoreMixin:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS anime_extra_names (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope TEXT NOT NULL DEFAULT 'anime',
+                    anime_name TEXT NOT NULL DEFAULT '',
+                    season_num TEXT NOT NULL DEFAULT '',
+                    part_num TEXT NOT NULL DEFAULT '',
+                    session_id TEXT NOT NULL DEFAULT '',
+                    extra_name TEXT NOT NULL COLLATE NOCASE,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(
+                        scope, anime_name, season_num,
+                        part_num, session_id, extra_name
+                    )
+                );
+
                 CREATE TABLE IF NOT EXISTS anime_display_names (
                     anime_name TEXT NOT NULL,
                     season_num TEXT NOT NULL DEFAULT '',
@@ -178,8 +195,13 @@ class CoreMixin:
 
                 CREATE INDEX IF NOT EXISTS idx_post_messages_post
                     ON post_messages(post_id);
+
                 """
             )
+
+            # R14: WAL — خواندن‌ها پشت نوشتن‌ها قفل نمی‌شوند و
+            # هزینهٔ fsync هر تراکنش نوشتن به‌شدت کاهش می‌یابد.
+            connection.execute("PRAGMA journal_mode = WAL")
 
             migrations = (
                 "ALTER TABLE uploads ADD COLUMN season_num TEXT",
@@ -223,6 +245,34 @@ class CoreMixin:
                         logger.warning(
                             "مهاجرت %s ناموفق بود: %s", migration, exc
                         )
+
+            # R14: ایندکس‌های سرعت — عمداً *بعد از* مهاجرت ALTER ستون‌ها
+            # تا روی دیتابیس‌های قدیمی (بدون season_num و ...) هم init
+            # شکست نخورد.
+            connection.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_uploads_name_season_part
+                    ON uploads(anime_name, season_num, part_num);
+
+                CREATE INDEX IF NOT EXISTS idx_uploads_status
+                    ON uploads(status);
+
+                CREATE INDEX IF NOT EXISTS idx_uploads_created
+                    ON uploads(created_at);
+
+                CREATE INDEX IF NOT EXISTS idx_downloads_user
+                    ON downloads(user_id);
+
+                CREATE INDEX IF NOT EXISTS idx_downloads_date
+                    ON downloads(downloaded_at);
+
+                CREATE INDEX IF NOT EXISTS idx_summaries_name
+                    ON season_summaries(anime_name);
+
+                CREATE INDEX IF NOT EXISTS idx_display_names_name
+                    ON anime_display_names(anime_name);
+                """
+            )
 
             # --- R12-1: مهاجرت جدول نام ظاهری به سطح (نام، فصل، پارت) ---
             # ردیف‌های قدیمی (به‌ازای کل نام واقعی) با season='' و part=''
@@ -367,3 +417,14 @@ class CoreMixin:
             self._load_settings(connection)
 
         logger.info("دیتابیس بررسی و آماده شد.")
+
+    def wal_checkpoint(self) -> None:
+        """R14: محتوای فایل جانبی WAL را به فایل اصلی دیتابیس منتقل کن.
+
+        قبل از بک‌آپِ کپی-خام فراخوانی شود تا کپی کامل باشد.
+        """
+        try:
+            with self.connect() as connection:
+                connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as exc:
+            logger.warning("wal_checkpoint ناموفق بود: %s", exc)

@@ -30,7 +30,7 @@ from ...keyboards import (
     settings_input_keyboard,
     settings_panel_keyboard,
 )
-from ...utils import go_to_main_menu, normalize_digits
+from ...utils import go_to_main_menu, normalize_digits, register_panel_message
 
 from .common import _MAX_DURATION_SECONDS, _admins_text, _channels_text, _dbs_text, _duration_text, _panel_text, _safe_edit, _show_prompt, _show_section, _store_prompt
 
@@ -49,10 +49,11 @@ async def open_settings(
     context.user_data.pop("st_chat", None)
     context.user_data.pop("st_new_db", None)
 
-    await update.message.reply_text(
+    sent = await update.message.reply_text(
         _panel_text(),
         reply_markup=settings_panel_keyboard(),
     )
+    register_panel_message(context, sent.message_id)
     return SETTINGS_PANEL
 
 

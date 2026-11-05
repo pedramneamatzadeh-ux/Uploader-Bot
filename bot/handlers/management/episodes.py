@@ -165,6 +165,17 @@ async def show_episode_list(
         ]
     )
 
+    # R16: اسم‌های جستجوی اضافی — فقط همین فصل/پارت
+    keyboard.append(
+        [
+            ib(
+                "📛 اسم‌های این فصل/پارت",
+                callback_data="mg_extra:group",
+                style="primary",
+            ),
+        ]
+    )
+
     keyboard.append(
         [
             ib("◀️ بازگشت", callback_data="mg_back"),

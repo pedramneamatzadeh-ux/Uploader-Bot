@@ -129,6 +129,17 @@ async def show_group_list(
 
         text = title + "\n".join(lines)
 
+    # R16: اسم‌های جستجوی اضافی — دامنهٔ کل انیمه
+    keyboard.append(
+        [
+            ib(
+                "📛 فهرست اسم‌ها",
+                callback_data="mg_extra:anime",
+                style="primary",
+            ),
+        ]
+    )
+
     keyboard.append(
         [
             ib("◀️ بازگشت", callback_data="mg_back"),

@@ -160,6 +160,35 @@ class UploadsMixin:
 
         return [dict(row) for row in rows]
 
+    def get_upload_identities(
+        self,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> List[Tuple[str, str, str]]:
+        """R15: هویت (نام، فصل، پارت) لینک‌های یک بازهٔ زمانی.
+
+        برای شمارش انیمه‌های یکتای هر دوره در «📈 آمار آپلود» —
+        یکتاسازی نمایشی (نام ظاهری) در لایهٔ آمار انجام می‌شود.
+        start/end رشتهٔ UTC هستند (خروجی period_boundaries).
+        """
+        sql = "SELECT anime_name, season_num, part_num FROM uploads"
+        conditions = []
+        params: list = []
+        if start is not None:
+            conditions.append("created_at >= ?")
+            params.append(start)
+        if end is not None:
+            conditions.append("created_at < ?")
+            params.append(end)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        with self.connect() as connection:
+            return [
+                (r[0], r[1], r[2])
+                for r in connection.execute(sql, params).fetchall()
+            ]
+
     def count_all_uploads(self) -> int:
         with self.connect() as connection:
             return connection.execute(
@@ -464,3 +493,30 @@ class UploadsMixin:
             ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def get_upload_ranges(
+        self,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> List[str]:
+        """R14: بازهٔ پیام‌های لینک‌ها با فیلتر اختیاری دوره (created_at).
+
+        start/end رشتهٔ UTC هستند (خروجی period_boundaries). بدون آرگومان
+        = همهٔ لینک‌ها.
+        """
+        sql = "SELECT channel_msg_range FROM uploads"
+        conditions = []
+        params: list = []
+        if start is not None:
+            conditions.append("created_at >= ?")
+            params.append(start)
+        if end is not None:
+            conditions.append("created_at < ?")
+            params.append(end)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        with self.connect() as connection:
+            rows = connection.execute(sql, tuple(params)).fetchall()
+
+        return [row[0] for row in rows]

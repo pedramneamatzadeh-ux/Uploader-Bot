@@ -25,6 +25,7 @@ from .constants import (
     MANAGE_DETAIL,
     MANAGE_EDIT,
     MANAGE_EPISODES,
+    MANAGE_EXTRA_TEXT,
     MANAGE_GROUPS,
     MANAGE_LIST,
     MANAGE_QUALITIES,
@@ -86,6 +87,7 @@ from .handlers.broadcast import (
 from .handlers.management import (
     cancel_management,
     handle_edit_input,
+    handle_extra_text,
     handle_management_callback,
     handle_search_input,
     handle_summary_photo,
@@ -208,7 +210,7 @@ def _build_upload_conversation() -> ConversationHandler:
             SEASON_NUM: [
                 CallbackQueryHandler(
                     season_callback,
-                    pattern=r"^(sn:\d+|sn:other)$",
+                    pattern=r"^(sn:\d+|sn:other|sn_other:[A-Za-z]+)$",
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_season_num),
             ],
@@ -248,7 +250,7 @@ def _build_upload_conversation() -> ConversationHandler:
             MessageHandler(filters.Regex("^لغو آپلود$"), cancel_upload),
             CallbackQueryHandler(
                 cancel_from_inline,
-                pattern=r"^(dbsel_cancel|cancel_multi)$",
+                pattern=r"^(dbsel_cancel|cancel_multi|cancel_prompt)$",
             ),
         ],
         allow_reentry=True,
@@ -447,6 +449,12 @@ def _build_management_conversation() -> ConversationHandler:
                                handle_summary_text),
                 CallbackQueryHandler(handle_management_callback),
             ],
+            # R16: انتظار متن «اسم(های) جستجوی اضافی» — پنل 📛 فهرست اسم‌ها
+            MANAGE_EXTRA_TEXT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND,
+                               handle_extra_text),
+                CallbackQueryHandler(handle_management_callback),
+            ],
         },
         fallbacks=[
             MessageHandler(filters.Regex("^لغو$"), cancel_management),
@@ -455,7 +463,7 @@ def _build_management_conversation() -> ConversationHandler:
             MessageHandler(filters.Regex("^لغو آپلود$"), cancel_upload),
             CallbackQueryHandler(
                 cancel_from_inline,
-                pattern=r"^(dbsel_cancel|cancel_multi)$",
+                pattern=r"^(dbsel_cancel|cancel_multi|cancel_prompt)$",
             ),
         ],
         allow_reentry=True,

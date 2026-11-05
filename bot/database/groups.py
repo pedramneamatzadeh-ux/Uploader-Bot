@@ -21,18 +21,20 @@ class GroupsMixin:
         term: Optional[str] = None,
         sort: str = "alpha",
         page: int = 0,
+        all_extras: bool = True,
     ) -> List[Dict[str, Any]]:
         """سطح ۱: فهرست برچسب‌های ظاهری (پس از ادغام) با تعداد لینک."""
         start = page * config.PAGE_SIZE
-        rows = self._display_name_rows(term, sort)
+        rows = self._display_name_rows(term, sort, all_extras)
         return rows[start:start + config.PAGE_SIZE]
 
     def count_anime_names(
         self,
         term: Optional[str] = None,
+        all_extras: bool = True,
     ) -> int:
         """تعداد ردیف‌های سطح ۱ پس از ادغام بر اساس برچسب."""
-        return len(self._display_name_rows(term))
+        return len(self._display_name_rows(term, all_extras=all_extras))
 
     @staticmethod
     def _group_sort_key(group: Dict[str, Any]) -> tuple:
@@ -265,6 +267,19 @@ class GroupsMixin:
                 )
                 connection.execute(
                     "DELETE FROM anime_display_names "
+                    "WHERE anime_name = ?",
+                    (old_name,),
+                )
+                # R16: اسم‌های جستجوی اضافی هم با نام واقعی جابه‌جا
+                # می‌شوند (در ادغام، مقصد برنده است — الگوی OR IGNORE
+                # + DELETE باقی‌مانده، مثل season_summaries بالای این).
+                connection.execute(
+                    "UPDATE OR IGNORE anime_extra_names "
+                    "SET anime_name = ? WHERE anime_name = ?",
+                    (new_name, old_name),
+                )
+                connection.execute(
+                    "DELETE FROM anime_extra_names "
                     "WHERE anime_name = ?",
                     (old_name,),
                 )

@@ -168,6 +168,13 @@ async def show_link_detail(
                     "🗑️ حذف", callback_data=f"delete:{session_id}"),
             ],
             [
+                ib(
+                    "📛 اسم‌های این لینک",
+                    callback_data=f"mg_extra:link:{session_id}",
+                    style="primary",
+                ),
+            ],
+            [
                 ib("📋 بازگشت به لیست",
                                      callback_data="back_to_list"),
                 ib(
@@ -205,6 +212,13 @@ async def show_link_detail(
                     toggle_label, callback_data=f"toggle:{session_id}"),
                 ib(
                     "🗑️ حذف", callback_data=f"delete:{session_id}"),
+            ],
+            [
+                ib(
+                    "📛 اسم‌های این لینک",
+                    callback_data=f"mg_extra:link:{session_id}",
+                    style="primary",
+                ),
             ],
             [
                 ib("📋 بازگشت به لیست",

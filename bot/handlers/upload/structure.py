@@ -28,7 +28,7 @@ from ...constants import (
 from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
-    CANCEL_MENU,
+    UPLOAD_CANCEL_INLINE,
     airing_status_keyboard,
     db_select_page1_keyboard,
     db_select_page2_keyboard,
@@ -37,11 +37,13 @@ from ...keyboards import (
     part_keyboard,
     quality_multiselect_keyboard,
     season_keyboard,
+    season_other_keyboard,
 )
 from ...utils import (
     build_download_link,
     get_default_channel_chat_id,
     go_to_main_menu,
+    register_panel_message,
     normalize_digits,
     normalize_optional_text,
     validate_anime_name,
@@ -50,7 +52,18 @@ from ...utils import (
 )
 
 from .cancel import cancel_upload
-from .common import CANCEL_TEXT, EPISODE_QUESTION_TEXT, MULTISELECT_PROMPT, _SEASON_TEXT_PATTERN, _part_question_text
+from .common import (
+    CANCEL_TEXT,
+    EPISODE_QUESTION_TEXT,
+    MULTISELECT_PROMPT,
+    _SEASON_TEXT_PATTERN,
+    _part_question_text,
+    clear_question_message,
+    close_question_message,
+    delete_answer_message,
+    is_other_season,
+    set_question_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +92,17 @@ async def movie_num_callback(
     await query.edit_message_text(
         f"✅ سینمایی شماره: {num}",
     )
-    await context.bot.send_message(
+    # R18: سؤال سینمایی با دکمه جواب داده شد — پیام خودش ادیت شد و
+    # سؤال تایپیِ در انتظاری باقی نمانده.
+    clear_question_message(context)
+    sent = await context.bot.send_message(
         chat_id=query.from_user.id,
         text=MULTISELECT_PROMPT,
         reply_markup=quality_multiselect_keyboard(
             [], bluray=context.user_data.get("is_bluray", 0)
         ),
     )
+    register_panel_message(context, sent.message_id)
     return MULTI_QUALITY
 
 
@@ -105,7 +122,7 @@ async def receive_movie_num(
     if not text.isdigit() or int(text) <= 0:
         await update.message.reply_text(
             "❌ فقط عدد وارد کن. مثال: 1",
-            reply_markup=CANCEL_MENU,
+            reply_markup=UPLOAD_CANCEL_INLINE,
         )
         return MOVIE_NUM
 
@@ -113,12 +130,16 @@ async def receive_movie_num(
     context.user_data["part_num"] = ""
     context.user_data["episode_range"] = "1"
 
-    await update.message.reply_text(
+    # R18: سؤال «سینمایی چندم» بسته + پیام جواب پاک می‌شود
+    await close_question_message(context, update.message.chat_id, text)
+    sent = await update.message.reply_text(
         MULTISELECT_PROMPT,
         reply_markup=quality_multiselect_keyboard(
             [], bluray=context.user_data.get("is_bluray", 0)
         ),
     )
+    register_panel_message(context, sent.message_id)
+    await delete_answer_message(context, update.message)
     return MULTI_QUALITY
 
 
@@ -137,10 +158,27 @@ async def season_callback(
     await query.answer()
 
     if query.data == "sn:other":
+        # R17: زیرصفحهٔ «سایر» — دکمه‌های OVA/ONA/Special + تایپ دستی
         await query.edit_message_text(
-            "📝 نوع فصل را تایپ کن (مثلاً OVA یا ONA یا Special):"
+            "📝 سایر — یکی از دکمه‌ها را بزن یا تایپ کن "
+            "(مثلاً OVA یا ONA یا Special):",
+            reply_markup=season_other_keyboard(),
         )
+        # R18: همان پیام همچنان سؤال تایپیِ در انتظار است
+        set_question_message(context, query.message.message_id)
         return SEASON_NUM
+
+    if query.data.startswith("sn_other:"):
+        # R17: انتخاب OVA/ONA/Special ⇒ سؤال بعدی «شماره» است نه «پارت»
+        value = query.data.split(":", 1)[1]
+        context.user_data["season_num"] = value
+        await query.edit_message_text(
+            _part_question_text(value, is_other=True),
+            reply_markup=part_keyboard(other=True),
+        )
+        # R18: پیام (ادیت‌شده) اکنون سؤال تایپیِ پارت/شماره است
+        set_question_message(context, query.message.message_id)
+        return PART_NUM
 
     num = query.data.split(":", 1)[1]
     context.user_data["season_num"] = num
@@ -149,6 +187,8 @@ async def season_callback(
         _part_question_text(num),
         reply_markup=part_keyboard(),
     )
+    # R18: پیام (ادیت‌شده) اکنون سؤال تایپیِ پارت است
+    set_question_message(context, query.message.message_id)
     return PART_NUM
 
 
@@ -189,10 +229,18 @@ async def receive_season_num(
 
     context.user_data["season_num"] = text
 
-    await update.message.reply_text(
-        _part_question_text(text),
-        reply_markup=part_keyboard(),
+    # R18: سؤال فصل بسته می‌شود («✅ ثبت شد: …» بدون دکمه)
+    await close_question_message(context, update.message.chat_id, text)
+
+    # R17: فصل‌های «سایر» (OVA/ONA/Special) ⇒ «شماره چند هست؟»
+    other = is_other_season(text)
+    sent = await update.message.reply_text(
+        _part_question_text(text, is_other=other),
+        reply_markup=part_keyboard(other=other),
     )
+    register_panel_message(context, sent.message_id)
+    set_question_message(context, sent.message_id)
+    await delete_answer_message(context, update.message)
     return PART_NUM
 
 
@@ -218,9 +266,18 @@ async def part_callback(
         context.user_data["part_num"] = num
         display = num
 
-    await query.edit_message_text(
-        f"✅ پارت: {display}\n\n{EPISODE_QUESTION_TEXT}"
+    # R17: برچسب «شماره» برای سایر‌فصل‌ها + لغو اینلاین زیر سؤال قسمت
+    label = (
+        "شماره"
+        if is_other_season(context.user_data.get("season_num"))
+        else "پارت"
     )
+    await query.edit_message_text(
+        f"✅ {label}: {display}\n\n{EPISODE_QUESTION_TEXT}",
+        reply_markup=UPLOAD_CANCEL_INLINE,
+    )
+    # R18: پیام (ادیت‌شده) اکنون سؤال تایپیِ محدودهٔ قسمت‌ها است
+    set_question_message(context, query.message.message_id)
     return EPISODE_RANGE
 
 
@@ -248,14 +305,24 @@ async def receive_part_num(
     else:
         await update.message.reply_text(
             "❌ فقط عدد (مثلاً 1) یا «ندارد» وارد کن:",
-            reply_markup=CANCEL_MENU,
+            reply_markup=UPLOAD_CANCEL_INLINE,
         )
         return PART_NUM
 
-    await update.message.reply_text(
-        f"✅ پارت: {display}\n\n{EPISODE_QUESTION_TEXT}",
-        reply_markup=CANCEL_MENU,
+    label = (
+        "شماره"
+        if is_other_season(context.user_data.get("season_num"))
+        else "پارت"
     )
+    # R18: سؤال پارت/شماره بسته می‌شود («✅ ثبت شد: …» بدون دکمه)
+    await close_question_message(context, update.message.chat_id, display)
+    sent = await update.message.reply_text(
+        f"✅ {label}: {display}\n\n{EPISODE_QUESTION_TEXT}",
+        reply_markup=UPLOAD_CANCEL_INLINE,
+    )
+    register_panel_message(context, sent.message_id)
+    set_question_message(context, sent.message_id)
+    await delete_answer_message(context, update.message)
     return EPISODE_RANGE
 
 
@@ -279,16 +346,20 @@ async def receive_episode_range(
     if not valid:
         await update.message.reply_text(
             f"❌ {error}\nدوباره وارد کن:",
-            reply_markup=CANCEL_MENU,
+            reply_markup=UPLOAD_CANCEL_INLINE,
         )
         return EPISODE_RANGE
 
     context.user_data["episode_range"] = text
 
-    await update.message.reply_text(
+    # R18: سؤال محدودهٔ قسمت‌ها بسته + پیام جواب پاک می‌شود
+    await close_question_message(context, update.message.chat_id, text)
+    sent = await update.message.reply_text(
         MULTISELECT_PROMPT,
         reply_markup=quality_multiselect_keyboard(
             [], bluray=context.user_data.get("is_bluray", 0)
         ),
     )
+    register_panel_message(context, sent.message_id)
+    await delete_answer_message(context, update.message)
     return MULTI_QUALITY

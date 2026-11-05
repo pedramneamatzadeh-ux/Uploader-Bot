@@ -44,6 +44,7 @@ from ...utils import (
     build_download_link,
     get_default_channel_chat_id,
     go_to_main_menu,
+    register_panel_message,
     normalize_digits,
     normalize_optional_text,
     validate_anime_name,
@@ -108,10 +109,11 @@ async def show_upload_confirm(
         ]
     ]
 
-    await message.reply_text(
+    sent = await message.reply_text(
         "\n".join(lines),
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
+    register_panel_message(context, sent.message_id)
 
 
 @admin_only

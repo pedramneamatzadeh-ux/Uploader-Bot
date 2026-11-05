@@ -8,7 +8,7 @@ from telegram import (
 )
 
 from .config import config
-from .constants import ALL_QUALITIES, QUALITY_ROWS, SETTINGS_BUTTON
+from .constants import ALL_QUALITIES, OTHER_SEASONS, QUALITY_ROWS, SETTINGS_BUTTON
 
 # ---------------------------------------------------------------------------
 # رنگ دکمه‌ها (Bot API 9.4 — style: primary/success/danger)
@@ -88,6 +88,13 @@ def main_menu_for(user_id: Optional[int]) -> ReplyKeyboardMarkup:
 
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
+
+# R17: لغو اینلاینِ پرامپت‌های متنیِ فلؤ آپلود اصلی — جایگزین
+# ریپلای‌کیبورد CANCEL_MENU در این فلو (ریپلای‌کیبورد لغو آپلود کلاً
+# حذف شد؛ CANCEL_MENU خودش برای ongoing/posts دست‌نخورده ماند).
+UPLOAD_CANCEL_INLINE = InlineKeyboardMarkup(
+    [[ib("لغو آپلود", callback_data="cancel_prompt", style="danger")]]
+)
 
 CANCEL_MENU = ReplyKeyboardMarkup(
     [[KeyboardButton("لغو آپلود", style="danger")]],
@@ -433,7 +440,7 @@ def season_keyboard() -> InlineKeyboardMarkup:
                 ib(
                     "📝 سایر (OVA/ONA/…)",
                     callback_data="sn:other",
-                    style="primary",
+                    style="success",
                 )
             ],
         ]
@@ -456,8 +463,13 @@ def movie_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def part_keyboard() -> InlineKeyboardMarkup:
-    """دکمه‌های ۱ تا ۴ + «پارت ندارد» زیر سؤال پارت (مرحله ۳ — R1)."""
+def part_keyboard(other: bool = False) -> InlineKeyboardMarkup:
+    """دکمه‌های ۱ تا ۴ + «ندارد» زیر سؤال پارت/شماره (مرحله ۳ — R1).
+
+    R17: «ندارد» قرمز است؛ برای فصل‌های «سایر» (OVA/ONA/Special —
+    other=True) که سؤال «شماره چند هست؟» می‌شود، برچسب «شماره ندارد».
+    """
+    none_label = "شماره ندارد" if other else "پارت ندارد"
     return InlineKeyboardMarkup(
         [
             [
@@ -470,13 +482,29 @@ def part_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 ib(
-                    "➖ پارت ندارد",
+                    f"➖ {none_label}",
                     callback_data="pn:none",
-                    style="primary",
+                    style="danger",
                 )
             ],
         ]
     )
+
+
+def season_other_keyboard() -> InlineKeyboardMarkup:
+    """R17: زیرصفحهٔ «📝 سایر» — دکمه‌های OVA/ONA/Special + لغو.
+
+    مثل خود سؤال فصل، تایپ دستی هم مجاز است (state همان SEASON_NUM
+    می‌ماند و receive_season_num متن را می‌گیرد).
+    """
+    rows = [
+        [
+            ib(s, callback_data=f"sn_other:{s}", style="primary")
+            for s in OTHER_SEASONS
+        ],
+        [ib("لغو آپلود", callback_data="cancel_prompt", style="danger")],
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 def quality_multiselect_keyboard(

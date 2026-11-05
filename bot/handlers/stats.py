@@ -13,6 +13,7 @@ from ..decorators import admin_only
 from ..keyboards import build_pagination_row, ib
 from ..utils import (
     build_download_link,
+    count_range_messages,
     fmt_tehran,
     format_anime_title,
     go_to_main_menu,
@@ -69,7 +70,10 @@ async def show_stats_menu(
             ib("📅 دوره‌ای", callback_data="stats_periods"),
             ib("🔴 گزارش‌ها", callback_data="stats_reports"),
         ],
-        [ib("🗂️ آمار دیتابیس", callback_data="stats_db")],
+        [
+            ib("🗂️ آمار دیتابیس", callback_data="stats_db"),
+            ib("📈 آمار آپلود", callback_data="stats_uploads"),
+        ],
         [ib("🏠 بازگشت به منوی اصلی", callback_data="stats_back_main")],
     ]
     await safe_edit_or_send(
@@ -634,6 +638,8 @@ def _db_stats_collect():
         "series": [k for k in groups if not k[3]],
         "movies": [k for k in groups if k[3]],
         "bluray": bluray,
+        # R14: نام‌های ظاهری یکتا = «تعداد کل انیمه‌ها»
+        "titles": {k[0] for k in groups},
     }
 
 
@@ -641,6 +647,10 @@ async def show_db_stats(chat_id, context, message_id=None):
     """R13: کارت مرور آمار دیتابیس — همهٔ اعداد کلیدی در یک نگاه."""
     data = _db_stats_collect()
     total_links = db.count_all_uploads()
+    # R14: کل فایل‌ها = جمع بازهٔ پیام‌های کانالِ همهٔ لینک‌ها
+    total_files = sum(
+        count_range_messages(r) for r in db.get_upload_ranges()
+    )
     n_air = db.count_ongoing_animes(active_only=True)
     n_fin = db.count_ongoing_animes() - n_air
     db_label = html.escape(
@@ -649,11 +659,14 @@ async def show_db_stats(chat_id, context, message_id=None):
 
     text = (
         f"📊 <b>آمار دیتابیس</b> — <code>{db_label}</code>\n\n"
-        f"🔗 کل لینک‌ها: <b>{total_links}</b>\n\n"
+        f"🔗 کل لینک‌ها: <b>{total_links}</b>\n"
+        f"📁 کل فایل‌ها: <b>{total_files}</b>\n"
+        f"🎌 کل انیمه‌ها: <b>{len(data['titles'])}</b>\n\n"
         f"📚 فصل/پارت (سریالی): <b>{len(data['series'])}</b>\n"
         f"🎬 آثار سینمایی: <b>{len(data['movies'])}</b>\n"
         f"🖨 گروه‌های بلوری: <b>{len(data['bluray'])}</b>\n\n"
         f"📮 پست‌ها: <b>{db.count_all_posts()}</b>\n"
+        f"📝 خلاصه داستان: <b>{db.count_season_summaries()}</b>\n"
         f"📺 درحال پخش: <b>{n_air}</b>\n"
         f"🏁 اتمام پخش: <b>{n_fin}</b>\n\n"
         "<i>گروه‌ها بر مبنای نام ظاهری شمرده شده‌اند.</i>"
@@ -835,6 +848,69 @@ async def show_db_ongoing_list(
     )
 
 
+async def show_upload_stats(chat_id, context, message_id=None):
+    """R14: آمار آپلود — روزانه/هفتگی/ماهانه/سالانه (شمسی، وقت تهران).
+
+    هر دوره: تعداد لینک + تعداد فایل (جمع بازهٔ پیام‌ها) + مقایسه با
+    دورهٔ قبلِ بسته. مرزها از period_boundaries (هفته = شنبه).
+    """
+    headers = {
+        "d": "📅 امروز",
+        "w": "📆 این هفته",
+        "m": "🗓 این ماه",
+        "y": "📊 امسال",
+    }
+    lines = [
+        "📈 <b>آمار آپلود</b>",
+        "<i>شمسی · به وقت تهران · دورهٔ جاری تا این لحظه</i>",
+    ]
+
+    for period in ("d", "w", "m", "y"):
+        bounds = period_boundaries(period)
+        current = db.get_upload_ranges(start=bounds["start"])
+        previous = db.get_upload_ranges(
+            start=bounds["prev_start"], end=bounds["prev_end"]
+        )
+        cur_files = sum(count_range_messages(r) for r in current)
+        if len(current) > len(previous):
+            arrow = "▲"
+        elif len(current) < len(previous):
+            arrow = "▼"
+        else:
+            arrow = "="
+
+        # R15: انیمه‌های یکتای دوره بر مبنای نام ظاهری
+        names = set()
+        for name, season, part in db.get_upload_identities(
+            start=bounds["start"]
+        ):
+            names.add(db.get_display_for(name, season, part) or name)
+
+        lines.append("")
+        lines.append(f"<b>{headers[period]}</b> — {bounds['label']}")
+        lines.append(
+            f"🔗 {len(current)} لینک · 📁 {cur_files} فایل"
+            f" · 🎌 {len(names)} انیمه"
+        )
+        lines.append(f"⏮ {bounds['prev_label']}: {len(previous)} لینک {arrow}")
+
+    keyboard = [
+        [
+            ib("🔄 تازه‌سازی", callback_data="stats_uploads"),
+            ib("◀️ بازگشت", callback_data="stats_back"),
+        ],
+    ]
+
+    await safe_edit_or_send(
+        context,
+        chat_id,
+        "\n".join(lines),
+        InlineKeyboardMarkup(keyboard),
+        message_id,
+        parse_mode="HTML",
+    )
+
+
 @admin_only
 async def handle_stats_callback(
     update: Update,
@@ -870,6 +946,8 @@ async def handle_stats_callback(
         )
     elif data == "stats_db":
         await show_db_stats(chat_id, context, message_id)
+    elif data == "stats_uploads":
+        await show_upload_stats(chat_id, context, message_id)
     elif data == "stats_db_qual":
         await show_db_quality_stats(chat_id, context, message_id)
     elif data.startswith("stats_db_bluray"):

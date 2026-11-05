@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from ..config import config
+from ..database import Database
 from ..decorators import owner_only
 from ..keyboards import main_menu_for
 
@@ -39,6 +40,9 @@ async def handle_backup(
             tmp_dir,
             f"backup_{os.path.basename(db_path)}",
         )
+        # R14: با WAL، اول نوشتن‌های در جریان را از فایل جانبی به
+        # فایل اصلی منتقل کن تا کپیِ خام کامل باشد.
+        Database(db_path).wal_checkpoint()
         shutil.copy2(db_path, backup_path)
 
         with open(backup_path, "rb") as backup_file:

@@ -40,6 +40,7 @@ from ...keyboards import (
     quality_keyboard,
 )
 from ...utils import (
+    register_panel_message,
     build_download_link,
     fmt_tehran,
     get_default_channel_chat_id,
@@ -288,10 +289,11 @@ async def receive_ongoing_upload_episode(
 
     upload["episode_range"] = text
 
-    await update.message.reply_text(
+    sent = await update.message.reply_text(
         "نوع آپلود را انتخاب کن:",
         reply_markup=_ogup_mode_markup(upload),
     )
+    register_panel_message(context, sent.message_id)
     return ONGOING_UPLOAD_MODE
 
 

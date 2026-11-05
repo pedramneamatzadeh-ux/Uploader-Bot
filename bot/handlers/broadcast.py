@@ -9,7 +9,7 @@ from ..constants import BROADCAST_CONFIRM, BROADCAST_INPUT
 from ..database import db
 from ..decorators import admin_only
 from ..keyboards import BROADCAST_CANCEL_MENU, ib, main_menu_for
-from ..utils import go_to_main_menu
+from ..utils import go_to_main_menu, register_panel_message
 
 
 logger = logging.getLogger(__name__)
@@ -21,12 +21,13 @@ async def start_broadcast(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
     context.user_data["broadcast_mode"] = True
-    await update.message.reply_text(
+    sent = await update.message.reply_text(
         "📢 پیام خود را برای ارسال به تمام کاربران وارد کنید:\n\n"
         "می‌توانید متن، عکس، ویدیو، فایل، استیکر و ... بفرستید.\n"
         "برای لغو دکمه «لغو» را بزنید.",
         reply_markup=BROADCAST_CANCEL_MENU,
     )
+    register_panel_message(context, sent.message_id)
     return BROADCAST_INPUT
 
 
@@ -66,12 +67,13 @@ async def receive_broadcast_message(
             ib("❌ لغو", callback_data="bc_cancel"),
         ]
     ]
-    await update.message.reply_text(
+    sent = await update.message.reply_text(
         "🔎 پیام بالا برای ارسال همگانی آماده است.\n\n"
         f"👥 تعداد گیرندگان: {user_count} کاربر\n\n"
         "آیا از ارسال این پیام مطمئن هستی؟",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
+    register_panel_message(context, sent.message_id)
     return BROADCAST_CONFIRM
 
 

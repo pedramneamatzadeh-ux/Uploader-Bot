@@ -15,6 +15,7 @@ from ...constants import (
     MANAGE_DETAIL,
     MANAGE_EDIT,
     MANAGE_EPISODES,
+    MANAGE_EXTRA_TEXT,
     MANAGE_GROUPS,
     MANAGE_LIST,
     MANAGE_QUALITIES,
@@ -55,6 +56,13 @@ from .common import (
 )
 from .detail import show_link_detail
 from .episodes import show_episode_list
+from .extras import (
+    _extra_kwargs,
+    extras_ret_state,
+    render_extras_host,
+    show_extras_panel,
+    start_extras_add,
+)
 from .groups import show_group_list
 from .list_l1 import show_link_list
 from .qualities import show_quality_list
@@ -191,7 +199,7 @@ async def _dispatch_management(
         manage["is_cinema"] = bool(item.get("cinema"))
         # R12-2: ردیف‌های سطح ۲ = اعضای (نام، نوع، فصل، پارت) خود گروه
         manage["l2"] = item.get("members") or db.get_combined_groups(names)
-        for key in ("season", "part", "episode", "l3", "l4"):
+        for key in ("season", "part", "episode", "l3", "l4", "extra"):
             manage.pop(key, None)
         context.user_data["manage"] = manage
         await show_group_list(chat_id, context)
@@ -218,6 +226,7 @@ async def _dispatch_management(
         manage["is_cinema"] = bool(group.get("is_cinema"))
         manage.pop("episode", None)
         manage.pop("l4", None)
+        manage.pop("extra", None)
 
         if group.get("session_id"):
             # B1: عضو لینک‌محور (یک لینک با alias جدا) ⇒ مستقیم جزئیات
@@ -396,6 +405,57 @@ async def _dispatch_management(
         return await handle_summary_callback(context, manage, query, data)
 
     # --- بقیه رفتارهای موجود (بدون تغییر) ---
+    # --- R16: «📛 فهرست اسم‌ها» — اسم‌های جستجوی اضافی (۳ دامنه) ---
+    if data.startswith("mg_extra:"):
+        scope = data.split(":", 1)[1]
+        session_id = ""
+        if scope.startswith("link:"):
+            session_id = scope.split(":", 1)[1]
+            scope = "link"
+        if scope not in ("anime", "group", "link") or (
+            scope == "link" and not session_id
+        ):
+            await query.answer("❌ گزینه نامعتبر.", show_alert=True)
+            return _level_state(manage)
+        if scope == "anime" and not (manage.get("names") or []):
+            await query.answer(
+                "❌ ابتدا یک انیمه را انتخاب کن.", show_alert=True
+            )
+            return _level_state(manage)
+        if scope == "group" and not (manage.get("name") or ""):
+            await query.answer(
+                "❌ ابتدا یک فصل/پارت را انتخاب کن.", show_alert=True
+            )
+            return _level_state(manage)
+        await query.answer()
+        await show_extras_panel(chat_id, context, scope, session_id or None)
+        return extras_ret_state(_manage(context))
+
+    if data.startswith("mg_extra_del:"):
+        try:
+            idx = int(data.split(":", 1)[1])
+        except ValueError:
+            idx = -1
+        names = (manage.get("extra") or {}).get("names") or []
+        if idx < 0 or idx >= len(names):
+            await query.answer("❌ گزینه نامعتبر.", show_alert=True)
+            await show_extras_panel(chat_id, context)
+            return extras_ret_state(manage)
+        name = names[idx]
+        db.delete_extra_name(extra_name=name, **_extra_kwargs(manage))
+        await query.answer(f"🗑 اسم «{name}» حذف شد.")
+        await show_extras_panel(chat_id, context)
+        return extras_ret_state(_manage(context))
+
+    if data == "mg_extra_add":
+        await query.answer()
+        await start_extras_add(chat_id, context)
+        return MANAGE_EXTRA_TEXT
+
+    if data in ("mg_extra_back", "mg_extra_cancel"):
+        await query.answer()
+        return await render_extras_host(chat_id, context)
+
     if data == "create_new":
         await query.edit_message_text(
             "📤 برای ایجاد لینک جدید، از منوی اصلی گزینه «آپلود» را انتخاب کنید."
@@ -733,6 +793,8 @@ async def _dispatch_management(
     if data.startswith("confirm_delete:"):
         session_id = data.split(":", 1)[1]
         if db.delete_upload(session_id):
+            # R16: اسم‌های جستجوی لینک‌محور هم با خود لینک می‌روند
+            db.delete_link_extra_names(session_id)
             await query.edit_message_text("✅ لینک با موفقیت حذف شد.")
             # B16: پیامِ جاری حالا toast حذف است ⇒ لیست بعدی با پیام
             # جدید ارسال شود (list_message_id پاک می‌شود).

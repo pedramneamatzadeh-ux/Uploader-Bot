@@ -45,6 +45,7 @@ from ...utils import (
 
 from .common import _manage, _recalc_manage_group
 from .detail import show_link_detail
+from .extras import jump_to_extra_hit
 from .groups import show_group_list
 from .list_l1 import show_link_list
 from .qualities import show_quality_list
@@ -418,6 +419,19 @@ async def handle_search_input(
     manage.update({"search_term": text, "mode": "search", "page": 0})
     context.user_data["manage"] = manage
     context.user_data.pop("search_mode", None)
+
+    # R16 «پرش مستقیم» (تصمیم کاربر): اگر جستجو دقیقاً یک نتیجهٔ
+    # فصل/پارت/سینمایی یا لینک بدهد (و هیچ انیمه‌ای مستقیماً مچ نشود)،
+    # همان صفحه باز می‌شود؛ وگرنه لیست سطح ۱ مثل قبل.
+    hits = db.search_extra_names(text)
+    scoped = [h for h in hits if h["scope"] in ("group", "link")]
+    pure_l1 = db.count_anime_names(term=text, all_extras=False)
+    if pure_l1 == 0 and len(scoped) == 1:
+        jumped = await jump_to_extra_hit(
+            update, chat_id, context, manage, scoped[0]
+        )
+        if jumped is not None:
+            return jumped
 
     await update.message.reply_text(f"🔍 در حال جستجو برای '{text}'...")
     await show_link_list(chat_id, context, 0)

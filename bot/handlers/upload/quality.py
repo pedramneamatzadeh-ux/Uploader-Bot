@@ -28,7 +28,7 @@ from ...constants import (
 from ...database import db
 from ...decorators import admin_only
 from ...keyboards import (
-    CANCEL_MENU,
+    UPLOAD_CANCEL_INLINE,
     airing_status_keyboard,
     db_select_page1_keyboard,
     db_select_page2_keyboard,
@@ -42,6 +42,7 @@ from ...utils import (
     build_download_link,
     get_default_channel_chat_id,
     go_to_main_menu,
+    register_panel_message,
     normalize_digits,
     normalize_optional_text,
     validate_anime_name,
@@ -50,7 +51,13 @@ from ...utils import (
 )
 
 from .cancel import cancel_upload
-from .common import CANCEL_TEXT, MULTISELECT_PROMPT
+from .common import (
+    CANCEL_TEXT,
+    MULTISELECT_PROMPT,
+    close_question_message,
+    delete_answer_message,
+    set_question_message,
+)
 from .confirm import show_upload_confirm
 
 logger = logging.getLogger(__name__)
@@ -93,14 +100,16 @@ async def multiselect_callback(
         await query.edit_message_text(
             f"✅ کیفیت‌های انتخاب‌شده: {', '.join(selected)}"
         )
-        await context.bot.send_message(
+        sent = await context.bot.send_message(
             chat_id=query.from_user.id,
             text=(
                 f"📐 محدوده پیام‌های «{selected[0]}» را وارد کن. "
                 "مثال: 100-110 یا 100"
             ),
-            reply_markup=CANCEL_MENU,
+            reply_markup=UPLOAD_CANCEL_INLINE,
         )
+        register_panel_message(context, sent.message_id)
+        set_question_message(context, sent.message_id)
         return MULTI_QUALITY_CHANNEL
 
     if data == "bluray_toggle":
@@ -159,7 +168,10 @@ async def multi_quality_channel_range(
     text = normalize_digits(text)
     valid, error = validate_channel_input(text)
     if not valid:
-        await update.message.reply_text(f"❌ {error}\nدوباره وارد کن:")
+        await update.message.reply_text(
+            f"❌ {error}\nدوباره وارد کن:",
+            reply_markup=UPLOAD_CANCEL_INLINE,
+        )
         return MULTI_QUALITY_CHANNEL
 
     queue: List[str] = list(context.user_data.get("mq_queue") or [])
@@ -172,13 +184,20 @@ async def multi_quality_channel_range(
         {"quality": quality, "channel_msg_range": text}
     )
 
+    # R18: پرامپت محدودهٔ پیام بسته می‌شود («✅ ثبت شد: …» بدون دکمه)
+    await close_question_message(context, update.message.chat_id, text)
+
     if queue:
-        await update.message.reply_text(
+        sent = await update.message.reply_text(
             f"📐 محدوده پیام‌های «{queue[0]}» را وارد کن. "
             "مثال: 100-110 یا 100",
-            reply_markup=CANCEL_MENU,
+            reply_markup=UPLOAD_CANCEL_INLINE,
         )
+        register_panel_message(context, sent.message_id)
+        set_question_message(context, sent.message_id)
+        await delete_answer_message(context, update.message)
         return MULTI_QUALITY_CHANNEL
 
     await show_upload_confirm(update.message, context)
+    await delete_answer_message(context, update.message)
     return CONFIRM
