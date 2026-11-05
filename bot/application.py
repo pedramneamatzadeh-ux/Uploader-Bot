@@ -1,7 +1,7 @@
 import logging
 import re
 
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -652,6 +652,13 @@ async def _global_error_handler(
 ) -> None:
     """P7: خطای غیرمنتظره ⇒ لاگ کامل + اطلاع خصوصی به مالک."""
     error = context.error
+    # B24: query منقضیٔ callback (کلیک وسط یک کار سنگین) رویدادی گذرا و
+    # بی‌خطر است — فقط لاگ؛ اطلاع «خطای غیرمنتظره» برای مالک نفرست.
+    if isinstance(error, BadRequest) and (
+        "query is too old" in str(error).lower()
+    ):
+        logger.info("callback query منقضی بود: %s", error)
+        return
     logger.error("خطای غیرمنتظره", exc_info=error)
     if config.OWNER_ID:
         try:

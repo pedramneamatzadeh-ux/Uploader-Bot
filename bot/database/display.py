@@ -66,6 +66,66 @@ class DisplayMixin:
 
         return row["display_name"] if row else anime_name
 
+    # ------------------------------------------------------------------
+    # B24: حل دسته‌ای نام ظاهری — یک اتصال به‌جای N اتصال (رفع N+1 آمار)
+    # ------------------------------------------------------------------
+    def get_display_index(self) -> Tuple[
+        Dict[Tuple[str, str, str], str], Dict[str, str]
+    ]:
+        """B24: کل anime_display_names را با *یک* کوئری در حافظه می‌آورد.
+
+        خروجی: ``(exact, by_name)``
+        - ``exact``: ``{(نام، فصل، پارت): نمایش}`` — همهٔ ردیف‌ها.
+        - ``by_name``: ``{نام: نمایش}`` — فقط ردیف‌های سطح-نام
+          (season='' و part='').
+
+        همراه ``resolve_display`` دقیقاً زنجیرهٔ ``get_display_for`` را
+        بازتولید می‌کند — برای حلقه‌های آمار که قبلاً به‌ازای هر ردیف
+        یک اتصال تازهٔ SQLite می‌گرفتند (کندی چندثانیه‌ای + block شدن
+        event loop).
+        """
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT anime_name, season_num, part_num, display_name "
+                "FROM anime_display_names"
+            ).fetchall()
+
+        exact: Dict[Tuple[str, str, str], str] = {}
+        by_name: Dict[str, str] = {}
+        for row in rows:
+            # B24: کلیدها *دقیقاً* مقادیر ذخیره‌شده‌اند (بدون strip) تا
+            # مقایسهٔ dict همان مقایسهٔ WHERE در SQL باشد؛ strip فقط روی
+            # ورودی resolve_display انجام می‌شود (مثل get_display_for).
+            season = str(row["season_num"] or "")
+            part = str(row["part_num"] or "")
+            exact[(row["anime_name"], season, part)] = row["display_name"]
+            if season == "" and part == "":
+                by_name[row["anime_name"]] = row["display_name"]
+        return exact, by_name
+
+    @staticmethod
+    def resolve_display(
+        index: Tuple[Dict[Tuple[str, str, str], str], Dict[str, str]],
+        anime_name: str,
+        season_num: Optional[str] = None,
+        part_num: Optional[str] = None,
+    ) -> str:
+        """B24: معادل حافظه‌ای ``get_display_for`` با همان زنجیره.
+
+        ردیف دقیق (نام، فصل، پارت) → ردیف سطح-نام → خود نام واقعی.
+        فصل/پارت ورودی strip می‌شوند (مثل get_display_for) و ردیف موجود
+        حتی با display_name خالی همان‌طور که SQL برمی‌گرداند برگردانده
+        می‌شود؛ مقایسهٔ کلیدها دقیقاً معادل WHERE در SQL است.
+        """
+        exact, by_name = index
+        season = str(season_num or "").strip()
+        part = str(part_num or "").strip()
+        if (anime_name, season, part) in exact:
+            return exact[(anime_name, season, part)]
+        if anime_name in by_name:
+            return by_name[anime_name]
+        return anime_name
+
     def set_display_for(
         self,
         anime_name: str,

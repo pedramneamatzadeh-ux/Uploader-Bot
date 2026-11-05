@@ -3,7 +3,7 @@ import logging
 import os
 
 from telegram import InlineKeyboardMarkup, Update
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ..config import config
@@ -43,6 +43,25 @@ def _display_for_row(row) -> str:
         row.get("season_num"),
         row.get("part_num"),
     )
+
+
+async def _safe_answer(query, text: str = None) -> None:
+    """B24: answer نشدن callback (query منقضی) نباید عملیات دکمه را بشکند.
+
+    پنجرهٔ answer تلگرام کوتاه است؛ اگر کاربر وسط یک کار سنگین دکمه‌ای
+    بزند، تا نوبت پردازش برسد query منقضی شده و ``query.answer()``
+    استثنای BadRequest می‌دهد («Query is too old…»). خودِ edit روی query
+    قدیمی بی‌مشکل کار می‌کند — پس فقط لاگ می‌گیریم و ادامه می‌دهیم.
+    """
+    try:
+        if text is None:
+            await query.answer()
+        else:
+            await query.answer(text)
+    except BadRequest:
+        logger.info(
+            "callback query منقضی بود — عملیات بدون answer ادامه یافت"
+        )
 
 
 @admin_only
@@ -184,6 +203,7 @@ async def show_top_anime_stats(
         lines.append("هنوز دانلودی ثبت نشده است.")
     else:
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        display_index = db.get_display_index()  # B24: یک اتصال برای کل صفحه
         start = page * TOP_PAGE_SIZE
         for idx, anime in enumerate(top, start=start + 1):
             medal = medals.get(idx, f"{idx}.")
@@ -192,7 +212,8 @@ async def show_top_anime_stats(
                 anime.get("season_num"),
                 anime.get("part_num"),
                 anime.get("anime_type"),
-                display=db.get_display_for(
+                display=db.resolve_display(
+                    display_index,
                     anime["anime_name"],
                     anime.get("season_num"),
                     anime.get("part_num"),
@@ -293,6 +314,7 @@ async def show_period_stats(
         lines.append("در این دوره دانلودی ثبت نشده است.")
     else:
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        display_index = db.get_display_index()  # B24: یک اتصال برای کل صفحه
         for idx, anime in enumerate(current["top"], start=1):
             medal = medals.get(idx, f"{idx}.")
             title = format_anime_title(
@@ -300,7 +322,8 @@ async def show_period_stats(
                 anime.get("season_num"),
                 anime.get("part_num"),
                 anime.get("anime_type"),
-                display=db.get_display_for(
+                display=db.resolve_display(
+                    display_index,
                     anime["anime_name"],
                     anime.get("season_num"),
                     anime.get("part_num"),
@@ -517,7 +540,7 @@ async def _resolve_report(
     report = db.get_report_by_id(report_id)
 
     if not db.update_report_status(report_id, "resolved"):
-        await query.answer("❌ خطا در بروزرسانی وضعیت.")
+        await _safe_answer(query, "❌ خطا در بروزرسانی وضعیت.")
         return
 
     notified = False
@@ -574,7 +597,7 @@ async def _resolve_report(
         toast = Msg.REPORT_RESOLVED_TOAST_OK
     else:
         toast = Msg.REPORT_RESOLVED_TOAST_FAIL
-    await query.answer(toast)
+    await _safe_answer(query, toast)
 
     await show_reports_stats(
         chat_id, context, page, message_id, only_pending
@@ -615,10 +638,16 @@ def _db_stats_collect():
 
     خروجی: dict با کلیدهای groups/series/movies/bluray.
     """
+    # B24: یک ایندکس حافظه‌ای به‌جای یک اتصال SQLite به‌ازای هر گروه
+    # (حذف N+1) — زنجیرهٔ حل نام ظاهری دقیقاً مثل قبل.
+    display_index = db.get_display_index()
     groups = {}
     for row in db.get_stats_groups():
-        display = db.get_display_for(
-            row["anime_name"], row["season_num"], row["part_num"]
+        display = db.resolve_display(
+            display_index,
+            row["anime_name"],
+            row["season_num"],
+            row["part_num"],
         )
         is_cinema = (row["anime_type"] or "") == "سینمایی"
         key = (
@@ -865,6 +894,11 @@ async def show_upload_stats(chat_id, context, message_id=None):
         "<i>شمسی · به وقت تهران · دورهٔ جاری تا این لحظه</i>",
     ]
 
+    # B24: ایندکس نام‌های ظاهری یک‌بار برای هر چهار دوره — قبلاً به‌ازای
+    # *هر لینک* یک اتصال تازهٔ SQLite گرفته می‌شد (بیش از هزار اتصال در
+    # دورهٔ سالانه روی سرور ⇒ ثانیه‌ها block شدن event loop).
+    display_index = db.get_display_index()
+
     for period in ("d", "w", "m", "y"):
         bounds = period_boundaries(period)
         current = db.get_upload_ranges(start=bounds["start"])
@@ -880,11 +914,20 @@ async def show_upload_stats(chat_id, context, message_id=None):
             arrow = "="
 
         # R15: انیمه‌های یکتای دوره بر مبنای نام ظاهری
+        # B24: حل نام در حافظه + رد کردن هویت‌های تکراری (یک هویت ممکن
+        # است در ده‌ها لینک تکرار شود) — خروجی دقیقاً مثل قبل.
         names = set()
+        seen = set()
         for name, season, part in db.get_upload_identities(
             start=bounds["start"]
         ):
-            names.add(db.get_display_for(name, season, part) or name)
+            ident = (name, (season or "").strip(), (part or "").strip())
+            if ident in seen:
+                continue
+            seen.add(ident)
+            names.add(
+                db.resolve_display(display_index, name, season, part) or name
+            )
 
         lines.append("")
         lines.append(f"<b>{headers[period]}</b> — {bounds['label']}")
@@ -925,7 +968,9 @@ async def handle_stats_callback(
     # R8-fix: برای resolve_report جواب باید همراه toast و *اولین*
     # answer باشد — هر query فقط یک‌بار answer می‌شود.
     if not data.startswith("resolve_report:"):
-        await query.answer()
+        # B24: query منقضی (کلیک وسط کار سنگین) نباید دکمه را از کار
+        # بیندازد — edit روی query قدیمی بی‌مشکل کار می‌کند.
+        await _safe_answer(query)
 
     if data == "stats_back_main":
         await query.edit_message_text("✅ به منوی اصلی بازگشتید.")
