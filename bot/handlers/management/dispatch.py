@@ -722,10 +722,30 @@ async def _dispatch_management(
         if action == "season":
             link = db.get_upload_by_id(session_id)
             if link and link.get("anime_type") == "سینمایی":
-                season_prompt = "🎬 شماره سینمایی جدید را وارد کنید:"
-            else:
-                season_prompt = "🔢 فصل جدید را وارد کنید:"
-            prompts = {"season": season_prompt}
+                # R19b: مثل ویرایش پارت — دکمهٔ قرمز «شماره ندارد» زیر
+                # پرامپت تا سینمایی‌های قبلی هم بدون شماره شوند.
+                kb = InlineKeyboardMarkup(
+                    [
+                        [
+                            ib(
+                                "➖ شماره ندارد",
+                                callback_data=(
+                                    f"set_season_none:{session_id}"
+                                ),
+                                style="danger",
+                            )
+                        ]
+                    ]
+                )
+                await query.edit_message_text(
+                    "🎬 شماره سینمایی جدید را وارد کنید:\n"
+                    "(اگر ندارد دکمه «➖ شماره ندارد» را بزن)\n\n"
+                    "برای لغو /cancel را تایپ کنید.",
+                    reply_markup=kb,
+                )
+                context.user_data["waiting_for_input"] = True
+                return MANAGE_EDIT
+            prompts = {"season": "🔢 فصل جدید را وارد کنید:"}
         else:
             prompts = {
                 "name": "✏️ نام جدید انیمه را وارد کنید:",
@@ -748,6 +768,28 @@ async def _dispatch_management(
             await show_link_detail(chat_id, context, session_id)
         else:
             await query.answer("❌ خطا در ذخیره.")
+        return MANAGE_DETAIL
+
+    if data.startswith("set_season_none:"):
+        # R19b: حذف شمارهٔ سینمایی — آینهٔ set_part_none (فقط سینمایی)
+        session_id = data.split(":", 1)[1]
+        link = db.get_upload_by_id(session_id)
+        if link and link.get("anime_type") == "سینمایی":
+            if db.update_upload(session_id, "season_num", ""):
+                await query.answer("✅ شماره سینمایی حذف شد.")
+                for key in (
+                    "edit_session", "edit_field", "waiting_for_input"
+                ):
+                    context.user_data.pop(key, None)
+                await show_link_detail(chat_id, context, session_id)
+            else:
+                await query.answer("❌ خطا در ذخیره.")
+        else:
+            await query.answer("❌ فقط برای سینمایی ممکن است.")
+            for key in ("edit_session", "edit_field", "waiting_for_input"):
+                context.user_data.pop(key, None)
+            if link:
+                await show_link_detail(chat_id, context, session_id)
         return MANAGE_DETAIL
 
     if data.startswith("set_quality:"):

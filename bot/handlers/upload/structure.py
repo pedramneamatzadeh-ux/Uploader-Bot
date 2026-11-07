@@ -81,8 +81,15 @@ async def movie_num_callback(
         return MOVIE_NUM
 
     await query.answer()
-    num = query.data.split(":", 1)[1]
-    if not num.isdigit():
+    value = query.data.split(":", 1)[1]
+    if value == "none":
+        # R19: سینمایی بدون شماره — season_num خالی (مثل pn:none در پارت)
+        num = ""
+        display = "ندارد"
+    elif value.isdigit():
+        num = value
+        display = value
+    else:
         return MOVIE_NUM
 
     context.user_data["season_num"] = num
@@ -90,7 +97,7 @@ async def movie_num_callback(
     context.user_data["episode_range"] = "1"
 
     await query.edit_message_text(
-        f"✅ سینمایی شماره: {num}",
+        f"✅ سینمایی شماره: {display}",
     )
     # R18: سؤال سینمایی با دکمه جواب داده شد — پیام خودش ادیت شد و
     # سؤال تایپیِ در انتظاری باقی نمانده.
@@ -119,19 +126,28 @@ async def receive_movie_num(
         return await cancel_upload(update, context)
 
     text = normalize_digits(text)
-    if not text.isdigit() or int(text) <= 0:
+    cleaned = normalize_optional_text(text)
+
+    # R19: «ندارد» (و هم‌معنی‌هایش) ⇒ سینمایی بدون شماره — مثل پارت
+    if cleaned == "":
+        num = ""
+        display = "ندارد"
+    elif cleaned.isdigit() and int(cleaned) > 0:
+        num = cleaned
+        display = cleaned
+    else:
         await update.message.reply_text(
-            "❌ فقط عدد وارد کن. مثال: 1",
+            "❌ فقط عدد (مثلاً 1) یا «ندارد» وارد کن:",
             reply_markup=UPLOAD_CANCEL_INLINE,
         )
         return MOVIE_NUM
 
-    context.user_data["season_num"] = text
+    context.user_data["season_num"] = num
     context.user_data["part_num"] = ""
     context.user_data["episode_range"] = "1"
 
     # R18: سؤال «سینمایی چندم» بسته + پیام جواب پاک می‌شود
-    await close_question_message(context, update.message.chat_id, text)
+    await close_question_message(context, update.message.chat_id, display)
     sent = await update.message.reply_text(
         MULTISELECT_PROMPT,
         reply_markup=quality_multiselect_keyboard(

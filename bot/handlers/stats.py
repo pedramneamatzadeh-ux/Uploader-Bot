@@ -616,7 +616,10 @@ def _db_group_label(name, season, part, is_cinema):
     season = html.escape(str(season or "").strip())
     part = html.escape(str(part or "").strip())
     if is_cinema:
-        return f"«{name}» — سینمایی شماره {season or 'نامشخص'}"
+        if season:
+            return f"«{name}» — سینمایی شماره {season}"
+        # R19: سینماییِ بدون شماره (mn:none)
+        return f"«{name}» — سینمایی (شماره ندارد)"
     label = f"«{name}» — فصل {season or 'نامشخص'}"
     if part:
         label += f" | پارت {part}"

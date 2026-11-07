@@ -71,7 +71,8 @@ def _scope_group_text(manage: Dict[str, Any]) -> str:
     season = manage.get("season") or ""
     part = manage.get("part") or ""
     if manage.get("is_cinema"):
-        return f"سینمایی شماره {season}"
+        # R19: سینماییِ بدون شماره
+        return f"سینمایی شماره {season}" if season else "سینمایی (شماره ندارد)"
     text = f"فصل {season}" if season else "بدون فصل"
     if part:
         text += f" | پارت {part}"

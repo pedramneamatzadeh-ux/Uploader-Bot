@@ -37,7 +37,12 @@ def _summary_ref(manage: dict) -> tuple:
     part = manage.get("part") or ""
     display = manage.get("display_name") or name
     if manage.get("is_cinema"):
-        label = f"🎬 {display} — Movie {season or '؟'}"
+        # R19c: سینماییِ بدون شماره ⇒ بدون «؟» (فقط «Movie»)
+        label = (
+            f"🎬 {display} — Movie {season}"
+            if season
+            else f"🎬 {display} — Movie"
+        )
     else:
         label = f"🎬 {display} — فصل {season or '؟'}"
         if part:

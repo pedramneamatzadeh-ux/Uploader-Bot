@@ -383,6 +383,12 @@ async def handle_edit_input(
 
     if field == "part":
         text = normalize_optional_text(text)
+    elif field == "season":
+        # R19b: تایپ «ندارد» برای *شمارهٔ سینمایی* ⇒ خالی (مثل دکمهٔ
+        # «➖ شماره ندارد» و مثل پارت)؛ فصل سریالی رفتار قبلی را دارد.
+        season_link = db.get_upload_by_id(session_id)
+        if season_link and season_link.get("anime_type") == "سینمایی":
+            text = normalize_optional_text(text)
 
     db_field = UPLOAD_FIELD_MAP.get(field, field)
 

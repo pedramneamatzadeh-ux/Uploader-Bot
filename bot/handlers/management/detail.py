@@ -109,7 +109,7 @@ async def show_link_detail(
 
     if is_cinema:
         lines.append(
-            f"🎞️ سینمایی شماره: {link.get('season_num') or 'نامشخص'}"
+            f"🎞️ سینمایی شماره: {link.get('season_num') or 'ندارد'}"
         )
     else:
         lines.append(f"🎞️ فصل: {link.get('season_num') or 'نامشخص'}")

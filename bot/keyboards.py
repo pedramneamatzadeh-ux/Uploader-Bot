@@ -448,7 +448,11 @@ def season_keyboard() -> InlineKeyboardMarkup:
 
 
 def movie_keyboard() -> InlineKeyboardMarkup:
-    """دکمه‌های ۱ تا ۴ زیر سؤال «سینمایی چندم هست؟» (مرحله ۳ — R1)."""
+    """دکمه‌های ۱ تا ۴ + «شماره ندارد» زیر سؤال «سینمایی چندم هست؟».
+
+    R19: مثل part_keyboard(other=True) — «شماره ندارد» قرمز (danger)
+    برای سینماییِ بدون شماره (mn:none ⇒ season_num خالی ذخیره می‌شود).
+    """
     return InlineKeyboardMarkup(
         [
             [
@@ -458,6 +462,13 @@ def movie_keyboard() -> InlineKeyboardMarkup:
             [
                 ib("3", callback_data="mn:3", style="primary"),
                 ib("4", callback_data="mn:4", style="primary"),
+            ],
+            [
+                ib(
+                    "➖ شماره ندارد",
+                    callback_data="mn:none",
+                    style="danger",
+                )
             ],
         ]
     )

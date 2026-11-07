@@ -52,7 +52,11 @@ from ...utils import (
     validate_episode_input,
 )
 
-from .common import EPISODE_QUESTION_TEXT
+from .common import (
+    EPISODE_QUESTION_TEXT,
+    MOVIE_QUESTION_TEXT,
+    set_question_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,7 @@ async def show_upload_confirm(
         lines.append("🏷️ نوع: سینمایی")
         lines.append(f"🎬 انیمه: {base.get('anime_name', '')}")
         lines.append(
-            f"🎞️ سینمایی شماره: {base.get('season_num') or 'نامشخص'}"
+            f"🎞️ سینمایی شماره: {base.get('season_num') or 'ندارد'}"
         )
     else:
         if base.get("anime_type"):
@@ -177,9 +181,13 @@ async def confirm_upload(
             context.user_data.pop(key, None)
 
         if context.user_data.get("anime_type") == "سینمایی":
+            # R19: همان کیبورد سؤال اصلی (شامل «شماره ندارد») + ثبت
+            # سؤال تایپی تا با جواب «✅ ثبت شد: …» بسته شود (R18).
             await query.edit_message_text(
-                "سینمایی چندم هست؟ (فقط عدد وارد کن)\nمثال: 1"
+                MOVIE_QUESTION_TEXT,
+                reply_markup=movie_keyboard(),
             )
+            set_question_message(context, query.message.message_id)
             return MOVIE_NUM
 
         await query.edit_message_text(EPISODE_QUESTION_TEXT)

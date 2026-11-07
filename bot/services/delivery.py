@@ -136,13 +136,19 @@ async def deliver_files_for_session(
         )
 
         if upload_data.get("anime_type") == "سینمایی":
+            # R19: سینمایی بدون شماره ⇒ خط شماره حذف (مثل پارت سریالی)
+            movie_num_line = (
+                f"\n🎞️ سینمایی شماره: {upload_data['season_num']}"
+                if upload_data.get("season_num")
+                else ""
+            )
             final_text = (
                 "✅ ارسال کامل شد!\n"
                 f"📥 {sent_count} فایل با کیفیت {upload_data['quality']} ارسال شد.\n"
                 "🏷️ نوع: سینمایی\n"
                 f"{bluray_line}"
-                f"🎬 {upload_data['anime_name']}\n"
-                f"🎞️ سینمایی شماره: {upload_data.get('season_num') or 'نامشخص'}"
+                f"🎬 {upload_data['anime_name']}"
+                f"{movie_num_line}"
             )
         else:
             part_line = (

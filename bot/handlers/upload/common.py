@@ -183,9 +183,17 @@ def _part_question_text(season_display: str, is_other: bool = False) -> str:
     return f"✅ فصل: {season_display}\n\n{question}"
 
 
+# R19: متن سؤال «سینمایی چندم» — مشترک بین هر دو مسیر (هویت و next_ep)
+MOVIE_QUESTION_TEXT = (
+    "سینمایی چندم هست؟\n"
+    "(یکی از دکمه‌ها را بزن یا عدد تایپ کن — اگر شماره ندارد "
+    "«➖ شماره ندارد» را بزن)"
+)
+
+
 async def _send_movie_question(target: Any, context: Any = None) -> None:
     sent = await target.reply_text(
-        "سینمایی چندم هست؟ (فقط عدد وارد کن)\nمثال: 1",
+        MOVIE_QUESTION_TEXT,
         reply_markup=movie_keyboard(),
     )
     if context is not None:

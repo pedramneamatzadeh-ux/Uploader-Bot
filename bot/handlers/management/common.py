@@ -81,7 +81,8 @@ def _group_label(season: str, part: str, is_cinema: bool) -> str:
     part = part or ""
 
     if is_cinema:
-        base = f"Movie {season}" if season else "Movie ?"
+        # R19c: سینماییِ بدون شماره ⇒ فقط «Movie» (بدون «?»)
+        base = f"Movie {season}" if season else "Movie"
     elif season:
         base = f"Season {season}"
     else:

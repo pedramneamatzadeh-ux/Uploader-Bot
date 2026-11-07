@@ -203,7 +203,7 @@ def _build_upload_conversation() -> ConversationHandler:
             ],
             MOVIE_NUM: [
                 CallbackQueryHandler(
-                    movie_num_callback, pattern=r"^mn:\d+$"
+                    movie_num_callback, pattern=r"^(mn:\d+|mn:none)$"
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_movie_num),
             ],
