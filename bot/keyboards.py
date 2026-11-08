@@ -53,9 +53,13 @@ MAIN_MENU_ROWS = [
 ]
 
 # رنگ دکمه‌های منوی اصلی (باقیمانده → primary)
+# R20: سه دکمهٔ مالک (پیام همگانی/تنظیمات/بک‌آپ) قرمز — درخواست صریح
+# کاربر؛ برای این سه، قاعدهٔ R11b «پنل اصلی تغییری نکنه» لغو شد.
 MAIN_MENU_STYLES = {
     "آپلود": "success",
-    SETTINGS_BUTTON: "primary",
+    "📢 پیام همگانی": "danger",
+    SETTINGS_BUTTON: "danger",
+    "💾 بک‌آپ": "danger",
 }
 
 
@@ -83,7 +87,7 @@ def main_menu_for(user_id: Optional[int]) -> ReplyKeyboardMarkup:
         or user_id in config.ADMIN_IDS
     ):
         rows[-1] = rows[-1] + [
-            KeyboardButton(SETTINGS_BUTTON, style="primary")
+            KeyboardButton(SETTINGS_BUTTON, style="danger")  # R20
         ]
 
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)

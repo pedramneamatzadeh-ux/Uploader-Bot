@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from ..constants import BROADCAST_CONFIRM, BROADCAST_INPUT
 from ..database import db
-from ..decorators import admin_only
+from ..decorators import owner_only
 from ..keyboards import BROADCAST_CANCEL_MENU, ib, main_menu_for
 from ..utils import go_to_main_menu, register_panel_message
 
@@ -15,7 +15,9 @@ from ..utils import go_to_main_menu, register_panel_message
 logger = logging.getLogger(__name__)
 
 
-@admin_only
+# R20: پیام همگانی فقط برای مالک — مثل تنظیمات و بک‌آپ، همهٔ
+# handlerها owner_only (دفاع در عمق)؛ ادمین «❌ دسترسی غیرمجاز!» می‌گیرد.
+@owner_only
 async def start_broadcast(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -31,7 +33,7 @@ async def start_broadcast(
     return BROADCAST_INPUT
 
 
-@admin_only
+@owner_only
 async def receive_broadcast_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -77,7 +79,7 @@ async def receive_broadcast_message(
     return BROADCAST_CONFIRM
 
 
-@admin_only
+@owner_only
 async def confirm_broadcast(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -150,6 +152,7 @@ async def confirm_broadcast(
     return ConversationHandler.END
 
 
+@owner_only
 async def cancel_broadcast(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

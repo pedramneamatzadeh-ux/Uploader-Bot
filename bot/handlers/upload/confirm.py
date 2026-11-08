@@ -231,6 +231,8 @@ async def confirm_upload(
             logger.exception("ذخیره ناموفق: %s", err)
             if query.message:
                 await query.message.reply_text(Msg.SAVE_ERROR)
+            # R21: مسیر خطا هم باید منوی اصلی را برگرداند (کیبورد حذف شده)
+            await go_to_main_menu(context, query.from_user.id)
             context.user_data.clear()
             return ConversationHandler.END
 

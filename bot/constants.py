@@ -208,6 +208,9 @@ class Msg:
     LINK_INACTIVE = "🚧 این لینک در حال حاضر غیرفعال است."
     INVALID_RANGE = "⚠️ محدوده‌ی پیام ذخیره‌شده نامعتبر است."
     PREPARING = "🔄 در حال آماده‌سازی فایل‌ها..."
+    # R21: پیام کوتاهِ شروع آپلود — تنها حامل ReplyKeyboardRemove است
+    # (تلگرام حذف کیبورد را فقط همراه یک پیام اعمال می‌کند).
+    UPLOAD_STARTED = "🚀 شروع آپلود…"
     UPLOAD_CANCELLED = "❌ فرآیند آپلود لغو شد."
     UPLOAD_CANCELLED_INLINE = "❌ آپلود لغو شد."
     UPLOAD_SAVED = "✅ آپلود با موفقیت ثبت شد."

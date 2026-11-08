@@ -5,7 +5,12 @@ import re
 import sqlite3
 import uuid
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+)
 from telegram.ext import ContextTypes, ConversationHandler
 from typing import Any, List
 
@@ -68,6 +73,12 @@ async def start_upload(
     custom_databases = db.get_custom_databases()
 
     if update.message:
+        # R21: ریپلای‌کیبورد منوی اصلی در طول فلؤ آپلود حذف می‌شود.
+        # هر مسیر خروج (پایان/لغو) با go_to_main_menu دوباره برمی‌گرداندش.
+        await update.message.reply_text(
+            Msg.UPLOAD_STARTED,
+            reply_markup=ReplyKeyboardRemove(),
+        )
         sent = await update.message.reply_text(
             PAGE1_TEXT,
             reply_markup=db_select_page1_keyboard(
