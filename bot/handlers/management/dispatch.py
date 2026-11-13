@@ -11,6 +11,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 from ...config import config
 from ...constants import (
     ALL_QUALITIES,
+    MSG_IDS_HINT,
+    EPISODE_IDS_HINT,
     EPISODE_RANGE,
     MANAGE_DETAIL,
     MANAGE_EDIT,
@@ -92,6 +94,14 @@ async def handle_management_callback(
             )
 
 
+# R23: دکمهٔ اینلاین «بازگشت» به‌جای تایپ /cancel در همهٔ پرامپت‌های
+# ورودی مدیریت. target = «link:<session_id>» یا «level».
+def _back_keyboard(target: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[ib("◀️ بازگشت", callback_data=f"input_back:{target}")]]
+    )
+
+
 def _alias_reset_keyboard(
     reset_callback: str,
     back_callback: str,
@@ -127,6 +137,18 @@ async def _dispatch_management(
         "aq_quality",
     ):
         context.user_data.pop(key, None)
+
+    if data.startswith("input_back:"):
+        # R23: «◀️ بازگشت» زیر پرامپت‌های ورودی متنی مدیریت
+        target = data[len("input_back:"):]
+        context.user_data.pop("rename_triple", None)
+        context.user_data.pop("add_quality_ref", None)
+        if target.startswith("link:"):
+            await show_link_detail(
+                chat_id, context, target.split(":", 1)[1]
+            )
+            return MANAGE_DETAIL
+        return await _refresh_current(chat_id, context, manage)
 
     if data == "back_to_main":
         await query.edit_message_text("✅ به منوی اصلی بازگشتید.")
@@ -495,7 +517,7 @@ async def _dispatch_management(
             "پیش هم قرار می‌گیرند.\n"
             "• اگر متفاوت باشد، این فصل/پارت یک انیمه جدا می‌شود.\n"
             "• نام لینک‌ها دست نمی‌خورد.\n\n"
-            "برای لغو /cancel را تایپ کن.",
+            "برای لغو، دکمهٔ «◀️ بازگشت» را بزن.",
             reply_markup=_alias_reset_keyboard(
                 "alias_reset_member", "split_cancel"
             ),
@@ -521,7 +543,9 @@ async def _dispatch_management(
             "⚠️ نام لینک‌های همین فصل در دیتابیس واقعاً تغییر می‌کند؛ "
             "اگر نام از قبل وجود داشته باشد، لینک‌ها زیر آن ادغام "
             "می‌شوند.\n\n"
-            "برای لغو /cancel را تایپ کن."
+            "برای لغو، دکمهٔ «◀️ بازگشت» را بزن.",
+            # R23: دکمهٔ بازگشت اینلاین به‌جای /cancel
+            reply_markup=_back_keyboard("level"),
         )
         context.user_data["rename_waiting"] = "physical"
         return MANAGE_EDIT
@@ -592,7 +616,7 @@ async def _dispatch_management(
             f"🎭 نام ظاهری فعلی: {current_alias}\n\n"
             "نام ظاهری جدید (فقط حروف انگلیسی) را وارد کن —\n"
             "باید با نام ظاهری گروه متفاوت باشد تا جدا شود.\n\n"
-            "برای لغو /cancel را تایپ کن.",
+            "برای لغو، دکمهٔ «◀️ بازگشت» را بزن.",
             reply_markup=_alias_reset_keyboard(
                 "alias_reset_member", "split_cancel"
             ),
@@ -683,7 +707,7 @@ async def _dispatch_management(
                 "• اگر با نام ظاهری گروه دیگری یکی شود، در لیست اول "
                 "پیش آن‌ها قرار می‌گیرد.\n"
                 "• اگر متفاوت باشد، این لینک یک انیمه جدا حساب می‌شود.\n\n"
-                "برای لغو /cancel را تایپ کن.",
+                "برای لغو، دکمهٔ «◀️ بازگشت» را بزن.",
                 reply_markup=_alias_reset_keyboard(
                     f"alias_reset_detail:{session_id}",
                     f"view_link:{session_id}",
@@ -707,13 +731,20 @@ async def _dispatch_management(
                             "ندارد ➖",
                             callback_data=f"set_part_none:{session_id}",
                         )
-                    ]
+                    ],
+                    # R23: بازگشت اینلاین به‌جای /cancel
+                    [
+                        ib(
+                            "◀️ بازگشت",
+                            callback_data=f"input_back:link:{session_id}",
+                        )
+                    ],
                 ]
             )
             await query.edit_message_text(
                 "📦 پارت جدید را وارد کنید:\n"
                 "(اگر ندارد دکمه «ندارد ➖» را بزن)\n\n"
-                "برای لغو /cancel را تایپ کنید.",
+                "برای لغو، دکمهٔ «◀️ بازگشت» را بزن.",
                 reply_markup=kb,
             )
             context.user_data["waiting_for_input"] = True
@@ -734,13 +765,22 @@ async def _dispatch_management(
                                 ),
                                 style="danger",
                             )
-                        ]
+                        ],
+                        # R23: بازگشت اینلاین به‌جای /cancel
+                        [
+                            ib(
+                                "◀️ بازگشت",
+                                callback_data=(
+                                    f"input_back:link:{session_id}"
+                                ),
+                            )
+                        ],
                     ]
                 )
                 await query.edit_message_text(
                     "🎬 شماره سینمایی جدید را وارد کنید:\n"
                     "(اگر ندارد دکمه «➖ شماره ندارد» را بزن)\n\n"
-                    "برای لغو /cancel را تایپ کنید.",
+                    "برای لغو، دکمهٔ «◀️ بازگشت» را بزن.",
                     reply_markup=kb,
                 )
                 context.user_data["waiting_for_input"] = True
@@ -749,12 +789,28 @@ async def _dispatch_management(
         else:
             prompts = {
                 "name": "✏️ نام جدید انیمه را وارد کنید:",
-                "episode": "📺 محدوده قسمت‌های جدید را وارد کنید. مثال: 1-12",
-                "channel": "🔢 محدوده پیام جدید را وارد کنید. مثال: 100-110 یا 100",
+                "episode": "📺 محدوده قسمت‌های جدید را وارد کنید. "
+                + EPISODE_IDS_HINT,
+                "channel": "🔢 محدوده پیام جدید را وارد کنید. "
+                + MSG_IDS_HINT,
             }
 
+        # R24 (P14): action ناشناخته (دکمهٔ کهنه/نسخهٔ قدیمی پنل) دیگر
+        # KeyError نمی‌دهد؛ پیام روشن + بازگشت به جزئیات لینک.
+        prompt = prompts.get(action)
+        if prompt is None:
+            logger.warning(
+                "action ناشناخته در پرامپت ویرایش: %r", action
+            )
+            await query.answer("❌ گزینهٔ نامعتبر.", show_alert=True)
+            await show_link_detail(chat_id, context, session_id)
+            return MANAGE_DETAIL
+
         await query.edit_message_text(
-            prompts[action] + "\n\nبرای لغو /cancel را تایپ کنید."
+            prompt
+            + "\n\nبرای لغو، دکمهٔ «◀️ بازگشت» را بزن.",
+            # R23: بازگشت اینلاین به جزئیات همین لینک
+            reply_markup=_back_keyboard(f"link:{session_id}"),
         )
         context.user_data["waiting_for_input"] = True
         return MANAGE_EDIT
@@ -880,7 +936,10 @@ async def _dispatch_management(
         context.user_data["aq_quality"] = quality
         context.user_data["aq_waiting"] = True
         await query.edit_message_text(
-            f"✅ کیفیت: {quality}\n\n🔢 محدوده پیام را وارد کن. مثال: 100-110 یا 100"
+            f"✅ کیفیت: {quality}\n\n🔢 محدوده پیام را وارد کن. "
+            + MSG_IDS_HINT,
+            # R23: بازگشت اینلاین به کیفیت‌های همین لینک
+            reply_markup=_back_keyboard(f"link:{session_id}"),
         )
         return MANAGE_EDIT
 

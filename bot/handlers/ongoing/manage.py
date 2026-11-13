@@ -75,7 +75,6 @@ async def handle_ongoing_manage_callback(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
     query = update.callback_query
-    await query.answer()
 
     chat_id = query.message.chat_id
     message_id = query.message.message_id
@@ -86,6 +85,7 @@ async def handle_ongoing_manage_callback(
         # B5: منوی میانی حذف شد — این دکمه خروج به منوی اصلی است
         await query.edit_message_text("✅ به منوی اصلی بازگشتید.")
         await go_to_main_menu(context, chat_id)
+        await query.answer()
         return ConversationHandler.END
 
     if data in ("og_back_list", "og_refresh"):
@@ -96,20 +96,24 @@ async def handle_ongoing_manage_callback(
         manage.pop("detail_message_id", None)
         context.user_data["ongoing_manage"] = manage
         await show_ongoing_anime_list(chat_id, context, manage.get("page", 0))
+        await query.answer()
         return ONGOING_LIST
 
     if data.startswith("og_page:"):
         page = max(0, int(data.split(":", 1)[1]))
         await show_ongoing_anime_list(chat_id, context, page)
+        await query.answer()
         return ONGOING_LIST
 
     if data == "og_add":
         context.user_data["ongoing_new"] = {}
         await query.edit_message_text("➕ نام انیمه درحال پخش را وارد کن:")
+        await query.answer()
         return ONGOING_CREATE_NAME
 
     if data == "og_to_upload":
         await show_ongoing_upload_select(chat_id, context, 0, query.message.message_id)
+        await query.answer()
         return ONGOING_UPLOAD_SELECT
 
     if data.startswith("og_view:"):
@@ -118,6 +122,7 @@ async def handle_ongoing_manage_callback(
         manage["detail_message_id"] = message_id
         context.user_data["ongoing_manage"] = manage
         await show_ongoing_anime_detail(chat_id, context, anime_id)
+        await query.answer()
         return ONGOING_DETAIL
 
     if data.startswith("og_edit:"):
@@ -149,6 +154,7 @@ async def handle_ongoing_manage_callback(
                 prompts.get(field, "مقدار جدید را وارد کن:")
                 + "\n\nبرای لغو، دکمه «لغو» را بزن.",
             )
+        await query.answer()
         return ONGOING_EDIT
 
     if data.startswith("og_edit_part_none:"):
@@ -190,6 +196,7 @@ async def handle_ongoing_manage_callback(
             "انیمه از لیست آپلود قسمت جدید خارج شد.",
         )
         await show_ongoing_anime_detail(chat_id, context, anime_id)
+        await query.answer()
         return ONGOING_DETAIL
 
     if data.startswith("og_unfinish_yes:"):
@@ -211,6 +218,7 @@ async def handle_ongoing_manage_callback(
             "انیمه دوباره فعال شد.",
         )
         await show_ongoing_anime_detail(chat_id, context, anime_id)
+        await query.answer()
         return ONGOING_DETAIL
 
     if data.startswith("og_unfinish:"):
@@ -234,6 +242,7 @@ async def handle_ongoing_manage_callback(
                 ]
             ),
         )
+        await query.answer()
         return ONGOING_DETAIL
 
     if data.startswith("og_finish:"):
@@ -265,6 +274,7 @@ async def handle_ongoing_manage_callback(
                 ]
             ),
         )
+        await query.answer()
         return ONGOING_DETAIL
 
     if data.startswith("og_delete:"):
@@ -280,6 +290,7 @@ async def handle_ongoing_manage_callback(
             "لینک‌های قبلاً ساخته‌شده حذف نمی‌شوند، فقط اطلاعات پیش‌فرض حذف می‌شود.",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
+        await query.answer()
         return ONGOING_DETAIL
 
     if data.startswith("og_confirm_delete:"):
@@ -289,6 +300,7 @@ async def handle_ongoing_manage_callback(
             manage.pop("detail_message_id", None)
             context.user_data["ongoing_manage"] = manage
             await show_ongoing_anime_list(chat_id, context, manage.get("page", 0))
+            await query.answer()
             return ONGOING_LIST
         await query.answer("❌ خطا در حذف.")
         return ONGOING_DETAIL
@@ -306,6 +318,7 @@ async def handle_ongoing_manage_callback(
             "season_num": item.get("season_num"),
             "part_num": item.get("part_num"),
         }
+        await query.answer()
         return await prompt_ongoing_db_or_episode(query, context)
 
     await query.answer(Msg.INVALID_COMMAND)

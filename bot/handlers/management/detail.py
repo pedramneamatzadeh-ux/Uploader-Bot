@@ -135,9 +135,11 @@ async def show_link_detail(
 
     text = "\n".join(lines)
 
-    toggle_label = (
-        "🚫 غیرفعال کن" if link["status"] == "active" else "✅ فعال کن"
-    )
+    # R23: لینک فعال ⇒ دکمهٔ «غیرفعال کن» قرمز؛ لینک غیرفعال ⇒
+    # «فعال کن» سبز (رنگ صریح، چون استنتاج خودکار سبز می‌داد).
+    is_active = link["status"] == "active"
+    toggle_label = "🚫 غیرفعال کن" if is_active else "✅ فعال کن"
+    toggle_style = "danger" if is_active else "success"
 
     if is_cinema:
         keyboard = [
@@ -152,6 +154,8 @@ async def show_link_detail(
             [
                 ib(
                     "🎭 ویرایش نام ظاهری (همین لینک)",
+                    # R23: این دکمه آبی
+                    style="primary",
                     callback_data=f"edit:alias:{session_id}",
                 )
             ],
@@ -163,7 +167,10 @@ async def show_link_detail(
             ],
             [
                 ib(
-                    toggle_label, callback_data=f"toggle:{session_id}"),
+                    toggle_label,
+                    style=toggle_style,
+                    callback_data=f"toggle:{session_id}",
+                ),
                 ib(
                     "🗑️ حذف", callback_data=f"delete:{session_id}"),
             ],
@@ -192,6 +199,8 @@ async def show_link_detail(
             [
                 ib(
                     "🎭 ویرایش نام ظاهری (همین لینک)",
+                    # R23: این دکمه آبی
+                    style="primary",
                     callback_data=f"edit:alias:{session_id}",
                 )
             ],
@@ -209,7 +218,10 @@ async def show_link_detail(
             ],
             [
                 ib(
-                    toggle_label, callback_data=f"toggle:{session_id}"),
+                    toggle_label,
+                    style=toggle_style,
+                    callback_data=f"toggle:{session_id}",
+                ),
                 ib(
                     "🗑️ حذف", callback_data=f"delete:{session_id}"),
             ],

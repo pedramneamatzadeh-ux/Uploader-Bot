@@ -14,6 +14,7 @@ from ...config import config
 from ...constants import (
     OTHER_SEASONS,
     ALL_QUALITIES,
+    EPISODE_IDS_HINT,
     ANIME_NAME,
     ANIME_TYPE,
     CONFIRM,
@@ -75,7 +76,7 @@ MULTISELECT_PROMPT = (
 _SEASON_TEXT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_/()-]*$")
 
 EPISODE_QUESTION_TEXT = (
-    "قسمت یا محدودهٔ قسمت‌ها را وارد کن. مثال: 2 یا 1-12"
+    "قسمت یا محدودهٔ قسمت‌ها را وارد کن. " + EPISODE_IDS_HINT
 )
 
 
@@ -160,9 +161,16 @@ async def delete_answer_message(context: Any, message: Any) -> None:
 
 
 # پذیرش متن انگلیسی برای «سایر» در سؤال فصل (OVA/ONA/…)
+# R23: متن در ثابت مشترک — دکمهٔ «◀️ بازگشت» زیرصفحهٔ «سایر» هم از آن
+# استفاده می‌کند.
+SEASON_QUESTION_TEXT = (
+    "فصل چند هست؟ (یکی از دکمه‌ها را بزن یا عدد/متن تایپ کن)"
+)
+
+
 async def _send_season_question(target: Any, context: Any = None) -> None:
     sent = await target.reply_text(
-        "فصل چند هست؟ (یکی از دکمه‌ها را بزن یا عدد/متن تایپ کن)",
+        SEASON_QUESTION_TEXT,
         reply_markup=season_keyboard(),
     )
     if context is not None:

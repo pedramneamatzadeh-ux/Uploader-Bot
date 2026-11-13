@@ -99,14 +99,15 @@ async def select_database(
     if not query or not query.data:
         return DB_SELECT
 
-    await query.answer()
     data = query.data
 
     if data == "dbsel_cancel":
-        await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_main_menu(context, query.from_user.id)
-        context.user_data.clear()
-        return ConversationHandler.END
+        # R23: اول تأیید بگیر (جلوگیری از لمس اشتباهی)
+        from .cancel import ask_cancel_confirm
+
+        await ask_cancel_confirm(update, context)
+        await query.answer()
+        return None  # state همان DB_SELECT می‌ماند
 
     if data == "dbsel_pg2":
         custom_databases = db.get_custom_databases()
@@ -120,6 +121,7 @@ async def select_database(
             PAGE2_TEXT,
             reply_markup=db_select_page2_keyboard(custom_databases),
         )
+        await query.answer()
         return DB_SELECT
 
     if data == "dbsel_pg1":
@@ -130,6 +132,7 @@ async def select_database(
                 bool(db.get_custom_databases()),
             ),
         )
+        await query.answer()
         return DB_SELECT
 
     if data.startswith("dbsel_c:"):
@@ -159,6 +162,7 @@ async def select_database(
             reply_markup=airing_status_keyboard(),
         )
         register_panel_message(context, sent.message_id)
+        await query.answer()
         return CUSTOM_AIRING
 
     # دیتابیس‌های اصلی: dbsel:<idx>
@@ -185,4 +189,5 @@ async def select_database(
         f"🏷️ نوع انیمه (خودکار): {anime_type}"
     )
     await _ask_anime_name_for(update, context)
+    await query.answer()
     return ANIME_NAME

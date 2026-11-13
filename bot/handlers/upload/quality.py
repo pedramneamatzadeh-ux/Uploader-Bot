@@ -14,6 +14,7 @@ from ...constants import (
     ALL_QUALITIES,
     ANIME_NAME,
     ANIME_TYPE,
+    MSG_IDS_HINT,
     CONFIRM,
     CUSTOM_AIRING,
     DB_SELECT,
@@ -44,6 +45,7 @@ from ...utils import (
     go_to_main_menu,
     register_panel_message,
     normalize_digits,
+    normalize_id_list_text,
     normalize_optional_text,
     validate_anime_name,
     validate_channel_input,
@@ -78,11 +80,12 @@ async def multiselect_callback(
     data = query.data
 
     if data == "mqs_cancel":
+        # R23: اول تأیید بگیر (جلوگیری از لمس اشتباهی)
+        from .cancel import ask_cancel_confirm
+
         await query.answer()
-        context.user_data.clear()
-        await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_main_menu(context, query.from_user.id)
-        return ConversationHandler.END
+        await ask_cancel_confirm(update, context)
+        return None  # state همان MULTI_QUALITY می‌ماند
 
     if data == "mqs_go":
         selected: List[str] = list(context.user_data.get("mq_selected") or [])
@@ -104,7 +107,7 @@ async def multiselect_callback(
             chat_id=query.from_user.id,
             text=(
                 f"📐 محدوده پیام‌های «{selected[0]}» را وارد کن. "
-                "مثال: 100-110 یا 100"
+                + MSG_IDS_HINT
             ),
             reply_markup=UPLOAD_CANCEL_INLINE,
         )
@@ -181,7 +184,11 @@ async def multi_quality_channel_range(
     quality = queue.pop(0)
     context.user_data["mq_queue"] = queue
     context.user_data.setdefault("qualities", []).append(
-        {"quality": quality, "channel_msg_range": text}
+        {
+            "quality": quality,
+            # R22: ذخیرهٔ یکدست متن آیدی‌ها
+            "channel_msg_range": normalize_id_list_text(text),
+        }
     )
 
     # R18: پرامپت محدودهٔ پیام بسته می‌شود («✅ ثبت شد: …» بدون دکمه)
@@ -190,7 +197,7 @@ async def multi_quality_channel_range(
     if queue:
         sent = await update.message.reply_text(
             f"📐 محدوده پیام‌های «{queue[0]}» را وارد کن. "
-            "مثال: 100-110 یا 100",
+            + MSG_IDS_HINT,
             reply_markup=UPLOAD_CANCEL_INLINE,
         )
         register_panel_message(context, sent.message_id)

@@ -18,29 +18,46 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+def preflight() -> bool:
+    """R24: چک‌های پیش‌از‌راه‌اندازی — جدا شده تا قابل تست باشد.
+
+    False یعنی ربات نباید بالا بیاید (خطا لاگ شده است).
+    """
     try:
         config.validate()
     except ValueError as err:
         logger.error("⚠️ خطای پیکربندی: %s", err)
-        return
+        return False
 
     db.init()
+    return _post_init_checks()
 
-    # چک‌های وابسته به دیتابیس (بعد از انتقال env به settings در init)
+
+def _post_init_checks() -> bool:
+    """چک‌های وابسته به دیتابیس (بعد از انتقال env به settings در init)."""
+    # R24: مالک خودش مجوز کامل دارد و می‌تواند از پنل تنظیمات ادمین اضافه
+    # کند ⇒ نبودِ ADMIN_IDS دیگر مانع راه‌اندازی نیست (قبلاً ربات با
+    # envای که فقط OWNER_ID داشت اصلاً بالا نمی‌آمد).
     if not config.ADMIN_IDS:
-        logger.error(
-            "⚠️ هیچ ادمینی تنظیم نشده است: هم در .env (ADMIN_IDS) "
-            "و هم در settings دیتابیس خالی است.",
+        if config.OWNER_ID is None:
+            logger.error(
+                "⚠️ هیچ ادمینی تنظیم نشده است: هم در .env (ADMIN_IDS) "
+                "و هم در settings دیتابیس خالی است.",
+            )
+            return False
+        logger.info(
+            "ℹ️ ADMIN_IDS خالی است — فعلاً فقط مالک (%s) دسترسی مدیریت "
+            "دارد. ادمین‌های بعدی را از «⚙️ تنظیمات» اضافه کنید.",
+            config.OWNER_ID,
         )
-        return
 
-    if config.DELETE_AFTER_SECONDS is None:
-        logger.error(
-            "⚠️ مدت حذف پیام (DELETE_AFTER_SECONDS) نه در .env "
-            "و نه در settings دیتابیس تنظیم نشده است.",
+    # R24: نبودِ مدت حذف دیگر مانع راه‌اندازی نیست — فقط حذف خودکار
+    # پیام‌ها خاموش می‌ماند تا از «⚙️ تنظیمات» تعیین شود.
+    if not config.DELETE_AFTER_SECONDS:
+        logger.warning(
+            "⚠️ مدت حذف پیام (DELETE_AFTER_SECONDS) تنظیم نشده است — "
+            "حذف خودکار پیام‌ها خاموش است. از «⚙️ تنظیمات» تعیین کنید.",
         )
-        return
 
     logger.info(
         "دیتابیس‌های ذخیره‌سازی: %s",
@@ -49,6 +66,12 @@ def main() -> None:
             for database in config.DATABASES
         ),
     )
+    return True
+
+
+def main() -> None:
+    if not preflight():
+        return
     logger.info("مالک ربات: %s", config.OWNER_ID)
     logger.info("ادمین‌ها: %s", ", ".join(map(str, config.ADMIN_IDS)))
 

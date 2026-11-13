@@ -36,7 +36,7 @@ from ...utils import (
     get_database_name,
     go_to_main_menu,
     normalize_optional_text,
-    parse_range,
+    parse_id_list,
     safe_edit_or_send,
     total_pages,
     validate_anime_name,
@@ -95,10 +95,12 @@ def _group_label(season: str, part: str, is_cinema: bool) -> str:
 
 
 def _episode_sort_key(item: dict) -> tuple:
-    rng = parse_range(item.get("episode_range") or "")
-    if rng is None:
+    # R22: محدوده قسمت می‌تواند چندتایی/ترکیبی باشد ⇒ مرتب‌سازی با
+    # کوچک‌ترین و بزرگ‌ترین آیدی (اپیزود 0 مجاز است).
+    ids = parse_id_list(item.get("episode_range") or "", allow_zero=True)
+    if not ids:
         return (1, 0, 0)
-    return (0, rng[0], rng[1])
+    return (0, min(ids), max(ids))
 
 
 def _recalc_manage_group(

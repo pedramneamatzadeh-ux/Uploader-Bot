@@ -116,28 +116,10 @@ async def show_quality_list(
 
         text = title + "\n".join(lines)
 
+    # R23: ترتیب دکمه‌های صفحهٔ کیفیت‌های سینمایی (درخواست کاربر):
+    # اسم ظاهری/واقعی ← افزودن کیفیت جدید ← خلاصه داستان ← بلوری ← اسم‌ها
     if is_cinema:
         _append_name_buttons(keyboard, manage)
-        # R10: خلاصه داستان (سینمایی: صفحه کیفیت‌ها، چون صفحه قسمت ندارد)
-        keyboard.append(
-            [
-                ib(
-                    "📝 خلاصه داستان فصل",
-                    callback_data="mg_sum",
-                )
-            ]
-        )
-        # R16: اسم‌های جستجوی اضافی — فقط همین سینمایی (سینمایی
-        # صفحهٔ قسمت ندارد؛ صفحهٔ کیفیت‌ها میزبان دامنهٔ گروه است)
-        keyboard.append(
-            [
-                ib(
-                    "📛 اسم‌های این سینمایی",
-                    callback_data="mg_extra:group",
-                    style="primary",
-                )
-            ]
-        )
 
     if rows:
         # P17 — «افزودن کیفیت جدید» از صفحه‌ی جزئیات به اینجا منتقل شد:
@@ -153,8 +135,18 @@ async def show_quality_list(
             ]
         )
 
+    if is_cinema:
+        # R10: خلاصه داستان (سینمایی: صفحه کیفیت‌ها، چون صفحه قسمت ندارد)
+        keyboard.append(
+            [
+                ib(
+                    "📝 خلاصه داستان فصل",
+                    callback_data="mg_sum",
+                )
+            ]
+        )
+
     # B22: تاگل بلوری — دامنه فقط اپیزود انتخاب‌شده (سینمایی: کل فیلم)
-    # و «افزودن کیفیت جدید» بالای آن است.
     _bluray_on = db.get_group_bluray(
         manage.get("name") or "",
         manage.get("season") or "",
@@ -174,6 +166,19 @@ async def show_quality_list(
             )
         ]
     )
+
+    if is_cinema:
+        # R16: اسم‌های جستجوی اضافی — فقط همین سینمایی (سینمایی
+        # صفحهٔ قسمت ندارد؛ صفحهٔ کیفیت‌ها میزبان دامنهٔ گروه است)
+        keyboard.append(
+            [
+                ib(
+                    "📛 اسم‌های این سینمایی",
+                    callback_data="mg_extra:group",
+                    style="primary",
+                )
+            ]
+        )
 
     keyboard.append(
         [

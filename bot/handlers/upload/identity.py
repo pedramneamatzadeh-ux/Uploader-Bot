@@ -155,11 +155,12 @@ async def receive_anime_type_callback(
     data = query.data
 
     if data == "uptype:cancel":
+        # R23: اول تأیید بگیر (جلوگیری از لمس اشتباهی)
+        from .cancel import ask_cancel_confirm
+
         await query.answer()
-        await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
-        await go_to_main_menu(context, query.from_user.id)
-        context.user_data.clear()
-        return ConversationHandler.END
+        await ask_cancel_confirm(update, context)
+        return None  # state همان ANIME_TYPE می‌ماند
 
     if data == "uptype:movie":
         value = "سینمایی"

@@ -32,7 +32,22 @@ from ...keyboards import (
 )
 from ...utils import go_to_main_menu, normalize_digits
 
-from .common import _MAX_DURATION_SECONDS, _admins_text, _channels_text, _dbs_text, _duration_text, _edit_by_id, _forwarded_user_id, _handle_text_cancel, _panel_text, _precheck_chat, _resolve_chat_target, _retry_input
+from .common import (
+    _MAX_DURATION_SECONDS,
+    _admin_names,
+    _admins_text,
+    _channel_titles,
+    _channels_text,
+    _dbs_text,
+    _duration_text,
+    _edit_by_id,
+    _forwarded_user_id,
+    _handle_text_cancel,
+    _panel_text,
+    _precheck_chat,
+    _resolve_chat_target,
+    _retry_input,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +100,9 @@ async def receive_admin_input(
         context.user_data.get("st_msg"),
         text,
         settings_admins_keyboard(
-            list(config.ADMIN_IDS or []), config.OWNER_ID
+            list(config.ADMIN_IDS or []),
+            config.OWNER_ID,
+            names=_admin_names(),
         ),
     )
     return SETTINGS_PANEL
@@ -125,6 +142,21 @@ async def receive_channel_input(
     channels.append(chat_id)
     db.set_setting("required_channels", channels)
 
+    # R23: عنوان کانال برای نمایش دو ستونی (ستون اسم) ذخیره می‌شود
+    try:
+        chat_obj = await context.bot.get_chat(chat_id)
+        title = (
+            getattr(chat_obj, "title", None)
+            or getattr(chat_obj, "username", None)
+            or ""
+        )
+        if title:
+            titles = dict(_channel_titles())
+            titles[str(chat_id)] = title
+            db.set_setting("required_channel_titles", titles)
+    except TelegramError:
+        logger.debug("ذخیرهٔ عنوان کانال ناموفق بود", exc_info=True)
+
     text = f"{Msg.CHANNEL_ADDED}\n\n{_channels_text()}"
     await _edit_by_id(
         context,
@@ -132,7 +164,8 @@ async def receive_channel_input(
         context.user_data.get("st_msg"),
         text,
         settings_channels_keyboard(
-            list(config.REQUIRED_CHANNELS or [])
+            list(config.REQUIRED_CHANNELS or []),
+            names=_channel_titles(),
         ),
     )
     return SETTINGS_PANEL

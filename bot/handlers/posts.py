@@ -412,7 +412,6 @@ async def handle_post_manage_callback(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
     query = update.callback_query
-    await query.answer()
 
     chat_id = query.message.chat_id
     message_id = query.message.message_id
@@ -423,6 +422,7 @@ async def handle_post_manage_callback(
         # B9: خروج به منوی اصلی (منوی میانی پست‌ها حذف شد)
         await query.edit_message_text("✅ به منوی اصلی بازگشتید.")
         await go_to_main_menu(context, chat_id)
+        await query.answer()
         return ConversationHandler.END
 
     if data == "pm_upload_new":
@@ -433,6 +433,7 @@ async def handle_post_manage_callback(
             "📝 نام پست را وارد کن:",
             reply_markup=POST_CANCEL_MENU,
         )
+        await query.answer()
         return POST_UPLOAD_NAME
 
     if data in ("pm_back_list", "pm_refresh"):
@@ -443,11 +444,13 @@ async def handle_post_manage_callback(
         manage.pop("detail_message_id", None)
         context.user_data["post_manage"] = manage
         await show_post_list(chat_id, context, manage.get("page", 0))
+        await query.answer()
         return POST_MANAGE_LIST
 
     if data.startswith("pm_page:"):
         page = max(0, int(data.split(":", 1)[1]))
         await show_post_list(chat_id, context, page)
+        await query.answer()
         return POST_MANAGE_LIST
 
     if data.startswith("pm_view:"):
@@ -456,6 +459,7 @@ async def handle_post_manage_callback(
         manage["detail_message_id"] = message_id
         context.user_data["post_manage"] = manage
         await show_post_detail(chat_id, context, post_id)
+        await query.answer()
         return POST_MANAGE_DETAIL
 
     if data.startswith("pm_toggle:"):
@@ -479,14 +483,25 @@ async def handle_post_manage_callback(
         context.user_data["post_manage"] = manage
         await query.edit_message_text(
             f"✏️ نام فعلی پست: {post['post_name']}\n\n"
-            "نام جدید را وارد کن (برای لغو /cancel را تایپ کن):"
+            "نام جدید را وارد کن (برای لغو دکمهٔ «◀️ بازگشت» را بزن):",
+            # R23: دکمهٔ بازگشت اینلاین به‌جای /cancel
+            reply_markup=InlineKeyboardMarkup(
+                [[
+                    ib(
+                        "◀️ بازگشت",
+                        callback_data=f"pm_view:{post_id}",
+                    )
+                ]]
+            ),
         )
+        await query.answer()
         return POST_MANAGE_EDIT
 
     if data.startswith("pm_preview:"):
         # B4: پیش‌نمایش — پیام‌های پست در همین چت کپی می‌شوند
         post_id = data.split(":", 1)[1]
         await preview_post(chat_id, context, post_id)
+        await query.answer()
         return POST_MANAGE_DETAIL
 
     if data.startswith("pm_delete:"):
@@ -505,6 +520,7 @@ async def handle_post_manage_callback(
             "⚠️ مطمئنی می‌خواهی این پست را حذف کنی?",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
+        await query.answer()
         return POST_MANAGE_DETAIL
 
     if data.startswith("pm_confirm_delete:"):
@@ -514,6 +530,7 @@ async def handle_post_manage_callback(
             manage.pop("detail_message_id", None)
             context.user_data["post_manage"] = manage
             await show_post_list(chat_id, context, manage.get("page", 0))
+            await query.answer()
             return POST_MANAGE_LIST
         await query.answer("❌ خطا در حذف.")
         return POST_MANAGE_DETAIL

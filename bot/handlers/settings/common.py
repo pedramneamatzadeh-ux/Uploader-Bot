@@ -10,6 +10,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from ...config import config
 from ...constants import (
+    BOT_VERSION,
+    BOT_VERSION_DATE,
     SETTINGS_ADMIN,
     SETTINGS_CHANNEL,
     SETTINGS_DB_CHAT,
@@ -77,22 +79,110 @@ def _panel_text() -> str:
             f"⏱ مدت حذف پیام: "
             f"{_human_duration(config.DELETE_AFTER_SECONDS)}",
             f"🗄️ دیتابیس‌های سفارشی: {len(databases)}",
+            f"🧩 نسخه: {BOT_VERSION} ({BOT_VERSION_DATE})",
         ]
     )
 
 
+def _user_names() -> dict:
+    """R23: نگاشت user_id → نام نمایشی برای دو ستون پنل ادمین‌ها."""
+    names = {}
+    try:
+        for row in db.get_all_users():
+            display = " ".join(
+                part
+                for part in (
+                    row.get("first_name") or "",
+                    row.get("last_name") or "",
+                )
+                if part
+            ).strip()
+            if not display:
+                display = row.get("username") or ""
+            if display:
+                names[int(row["user_id"])] = display
+    except Exception:  # نگاشت نام‌ها هرگز نباید پنل را بشکند
+        logger.debug("خواندن نام کاربران ناموفق بود", exc_info=True)
+    return names
+
+
+def _admin_names() -> dict:
+    names = _user_names()
+    owner = config.OWNER_ID
+    if owner in names:
+        names[owner] = f"{names[owner]} 👑"
+    return names
+
+
+def _channel_titles() -> dict:
+    """R23: عنوان کانال‌ها که هنگام افزودن ذخیره شده است (id → title)."""
+    try:
+        stored = db.get_setting("required_channel_titles", {}) or {}
+    except Exception:
+        logger.debug("خواندن عنوان کانال‌ها ناموفق بود", exc_info=True)
+        return {}
+    if not isinstance(stored, dict):
+        return {}
+    return {str(key): value for key, value in stored.items()}
+
+
+async def ensure_channel_titles(context) -> dict:
+    """R23b: عنوان کانال‌هایی که قبلاً اضافه شده‌اند ولی عنوانشان ذخیره
+    نشده را یک‌بار با get_chat می‌گیرد و ذخیره می‌کند.
+
+    اگر ربات به کانال دسترسی نداشت، همان مقدار قبلی (بدون عنوان) می‌ماند.
+    هرگز استثنا نمی‌دهد.
+    """
+    try:
+        titles = dict(_channel_titles())
+    except Exception:
+        return {}
+
+    changed = False
+    for channel in (config.REQUIRED_CHANNELS or []):
+        key = str(channel)
+        if key in titles and titles[key]:
+            continue
+        if not key.lstrip("-").isdigit():
+            continue  # یوزرنیم: خودش نام است
+        try:
+            chat = await context.bot.get_chat(int(key))
+        except Exception:
+            logger.debug(
+                "گرفتن عنوان کانال %s ناموفق بود", key, exc_info=True
+            )
+            continue
+        title = getattr(chat, "title", None) or getattr(chat, "username", None)
+        if title:
+            titles[key] = title
+            changed = True
+
+    if changed:
+        try:
+            db.set_setting("required_channel_titles", titles)
+        except Exception:
+            logger.debug("ذخیرهٔ عنوان کانال‌ها ناموفق بود", exc_info=True)
+    return titles
+
+
 def _admins_text() -> str:
+    # R23: دو ستون — راست اسم اکانت، چپ آیدی عددی
     owner_id = config.OWNER_ID
+    names = _user_names()
     lines = ["👨‍💼 ادمین‌ها", ""]
 
     if owner_id is not None:
-        lines.append(f"👑 {owner_id} — مالک (ثابت)")
+        owner_name = names.get(owner_id) or "—"
+        lines.append(f"👑 {owner_name} — {owner_id} (مالک، ثابت)")
 
     others = [
         item for item in (config.ADMIN_IDS or []) if item != owner_id
     ]
     if others:
-        lines.extend(f"❌ {item}" for item in others)
+        lines.extend(
+            f"👤 {names.get(int(item)) or '—'} — {item}"
+            for item in others
+        )
     else:
         lines.append("— ادمین دیگری ثبت نشده است")
 
@@ -100,14 +190,21 @@ def _admins_text() -> str:
 
 
 def _channels_text() -> str:
+    # R23: دو ستون — راست اسم کانال، چپ آیدی عددی
     channels = config.REQUIRED_CHANNELS or []
+    titles = _channel_titles()
     lines = ["📢 کانال‌های اجباری عضویت", ""]
 
     if not channels:
         lines.append("— کانالی ثبت نشده است")
     else:
-        lines.extend(f"❌ {channel}" for channel in channels)
-
+        for channel in channels:
+            key = str(channel)
+            if key.lstrip("-").isdigit():
+                name = titles.get(key) or "—"
+                lines.append(f"📢 {name} — {key}")
+            else:
+                lines.append(f"📢 {key} — (یوزرنیم)")
     return "\n".join(lines)
 
 

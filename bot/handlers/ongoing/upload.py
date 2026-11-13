@@ -27,6 +27,7 @@ from ...constants import (
     ONGOING_UPLOAD_SELECT,
     ONGOING_UPLOAD_SINGLE_QUALITY,
     ONGOING_UPLOAD_SINGLE_RANGE,
+    MSG_IDS_HINT,
     Msg,
 )
 from ...database import db
@@ -45,6 +46,7 @@ from ...utils import (
     fmt_tehran,
     get_default_channel_chat_id,
     go_to_ongoing_list,
+    normalize_id_list_text,
     normalize_optional_text,
     safe_edit_or_send,
     total_pages,
@@ -176,12 +178,12 @@ async def select_ongoing_database(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
     query = update.callback_query
-    await query.answer()
 
     if query.data == "og_dbsel_cancel":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
         await go_to_ongoing_list(context, query.message.chat_id)
+        await query.answer()
         return ONGOING_LIST
 
     idx = int(query.data.split(":", 1)[1])
@@ -205,6 +207,7 @@ async def select_ongoing_database(
         ),
         reply_markup=ONGOING_CANCEL_MENU,
     )
+    await query.answer()
     return ONGOING_UPLOAD_EPISODE
 
 
@@ -214,7 +217,6 @@ async def handle_ongoing_upload_select_callback(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
     query = update.callback_query
-    await query.answer()
 
     chat_id = query.message.chat_id
     data = query.data
@@ -222,26 +224,31 @@ async def handle_ongoing_upload_select_callback(
     if data == "ogup_back_menu":
         await query.edit_message_text("✅ به منوی انیمه‌های درحال پخش برگشتید.")
         await go_to_ongoing_list(context, chat_id)
+        await query.answer()
         return ONGOING_LIST
 
     if data == "ogup_manage":
         context.user_data["ongoing_manage"] = {"page": 0}
         await show_ongoing_anime_list(chat_id, context, 0)
+        await query.answer()
         return ONGOING_LIST
 
     if data == "og_add":
         context.user_data["ongoing_new"] = {}
         await query.edit_message_text("➕ نام انیمه درحال پخش را وارد کن:")
+        await query.answer()
         return ONGOING_CREATE_NAME
 
     if data == "ogup_refresh":
         page = context.user_data.get("ongoing_upload_page", 0)
         await show_ongoing_upload_select(chat_id, context, page, query.message.message_id)
+        await query.answer()
         return ONGOING_UPLOAD_SELECT
 
     if data.startswith("ogup_page:"):
         page = max(0, int(data.split(":", 1)[1]))
         await show_ongoing_upload_select(chat_id, context, page, query.message.message_id)
+        await query.answer()
         return ONGOING_UPLOAD_SELECT
 
     if data.startswith("ogup_sel:"):
@@ -260,6 +267,7 @@ async def handle_ongoing_upload_select_callback(
             "season_num": item.get("season_num"),
             "part_num": item.get("part_num"),
         }
+        await query.answer()
         return await prompt_ongoing_db_or_episode(query, context)
 
     await query.answer(Msg.INVALID_COMMAND)
@@ -287,7 +295,8 @@ async def receive_ongoing_upload_episode(
         await go_to_ongoing_list(context, update.message.chat_id)
         return ONGOING_LIST
 
-    upload["episode_range"] = text
+    # R22: ذخیرهٔ یکدست (ارقام انگلیسی، بدون فاصله)
+    upload["episode_range"] = normalize_id_list_text(text)
 
     sent = await update.message.reply_text(
         "نوع آپلود را انتخاب کن:",
@@ -345,7 +354,7 @@ async def handle_ongoing_upload_mode_callback(
         context.user_data["_ongoing_current_quality"] = "480p"
         await query.edit_message_text(
             "🔥 حالت سه کیفیت استاندارد انتخاب شد.\n\n"
-            "🔢 محدوده پیام کیفیت 480p را وارد کن. مثال: 100-105 یا 100"
+            "🔢 محدوده پیام کیفیت 480p را وارد کن. " + MSG_IDS_HINT
         )
         return ONGOING_UPLOAD_MULTI_RANGE
 
@@ -372,7 +381,8 @@ async def ongoing_single_quality_callback(
     upload["quality"] = quality
 
     await query.edit_message_text(
-        f"✅ کیفیت: {quality}\n\n🔢 محدوده پیام‌های کانال را وارد کن. مثال: 100-110 یا 100"
+        f"✅ کیفیت: {quality}\n\n🔢 محدوده پیام‌های کانال را وارد کن. "
+        + MSG_IDS_HINT
     )
     return ONGOING_UPLOAD_SINGLE_RANGE
 
@@ -393,7 +403,8 @@ async def receive_ongoing_single_range(
         return ONGOING_UPLOAD_SINGLE_RANGE
 
     upload = context.user_data.setdefault("ongoing_upload", {})
-    upload["channel_msg_range"] = text
+    # R22: ذخیرهٔ یکدست متن آیدی‌ها (ارقام انگلیسی، بدون فاصله)
+    upload["channel_msg_range"] = normalize_id_list_text(text)
 
     await show_ongoing_upload_confirm(update.message, context)
     return ONGOING_UPLOAD_CONFIRM
@@ -417,7 +428,8 @@ async def ongoing_multi_quality_callback(
     context.user_data["_ongoing_current_quality"] = quality
 
     await query.edit_message_text(
-        f"✅ کیفیت: {quality}\n\n🔢 محدوده پیام این کیفیت را وارد کن. مثال: 100-110 یا 100"
+        f"✅ کیفیت: {quality}\n\n🔢 محدوده پیام این کیفیت را وارد کن. "
+        + MSG_IDS_HINT
     )
     return ONGOING_UPLOAD_MULTI_RANGE
 
@@ -445,7 +457,10 @@ async def receive_ongoing_multi_range(
         await update.message.reply_text("❌ کیفیت انتخاب نشده است. دوباره شروع کن.")
         return ONGOING_LIST
 
-    upload["qualities"].append({"quality": quality, "channel_msg_range": text})
+    upload["qualities"].append({
+        "quality": quality,
+        "channel_msg_range": normalize_id_list_text(text),
+    })
 
     if "og_std_sequence" in context.user_data:
         seq = context.user_data["og_std_sequence"]
@@ -456,7 +471,8 @@ async def receive_ongoing_multi_range(
             next_quality = seq[idx]
             context.user_data["_ongoing_current_quality"] = next_quality
             await update.message.reply_text(
-                f"🔢 محدوده پیام کیفیت {next_quality} را وارد کن. مثال: 120-125 یا 120",
+                f"🔢 محدوده پیام کیفیت {next_quality} را وارد کن. "
+                + MSG_IDS_HINT,
                 reply_markup=ONGOING_CANCEL_MENU,
             )
             return ONGOING_UPLOAD_MULTI_RANGE
@@ -487,12 +503,16 @@ async def ongoing_multi_ask_more_callback(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
     query = update.callback_query
-    await query.answer()
+
+    # R24: قبلاً این متغیر فقط در شاخهٔ «تمام شد» تعریف می‌شد؛ دکمهٔ
+    # «✅ بله، کیفیت بعدی» با NameError می‌شکست.
+    upload = context.user_data.get("ongoing_upload", {})
 
     if query.data == "ogup_cancel":
         context.user_data.pop("ongoing_upload", None)
         await query.edit_message_text(Msg.UPLOAD_CANCELLED_INLINE)
         await go_to_ongoing_list(context, query.message.chat_id)
+        await query.answer()
         return ONGOING_LIST
 
     if query.data == "ogup_add_more":
@@ -503,14 +523,15 @@ async def ongoing_multi_ask_more_callback(
                 bluray=upload.get("is_bluray", 0),
             ),
         )
+        await query.answer()
         return ONGOING_UPLOAD_MULTI_QUALITY
 
     if query.data == "ogup_finish":
-        upload = context.user_data.get("ongoing_upload", {})
         if not upload.get("qualities"):
             await query.answer("حداقل یک کیفیت لازم است.", show_alert=True)
             return ONGOING_UPLOAD_MULTI_ASK
         await show_ongoing_upload_confirm(query, context)
+        await query.answer()
         return ONGOING_UPLOAD_CONFIRM
 
     await query.answer(Msg.INVALID_COMMAND)

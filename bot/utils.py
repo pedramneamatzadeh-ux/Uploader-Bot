@@ -18,6 +18,10 @@ from .keyboards import main_menu_for
 logger = logging.getLogger(__name__)
 
 
+# R22: سقف تعداد آیدی در یک لینک (محافظت از فلاد تلگرام)
+MAX_ID_LIST = 300
+
+
 # تبدیل ارقام فارسی/عربی به انگلیسی (مرحله ۳ — R1)
 _DIGIT_TRANSLATION = str.maketrans(
     "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩",
@@ -90,7 +94,114 @@ def is_member_status(chat_member: Any) -> bool:
     return False
 
 
+def _clean_id_text(text: Optional[str]) -> str:
+    """یکدست‌سازی متن فهرست آیدی: ارقام انگلیسی، «،»→«,»، خط‌تیره‌های
+    یونیکد (‐ – —) → «-» و حذف فاصله‌های اطراف جداکننده‌ها
+    («10, 13 - 15» هم پذیرفته شود). فاصلهٔ *داخل* عدد حذف نمی‌شود تا
+    «10 13» به‌اشتباه «1013» نشود (نامعتبر می‌ماند)."""
+    clean = normalize_digits(str(text or "").strip())
+    clean = (
+        clean.replace("،", ",")
+        .replace("٬", ",")
+        .replace("‐", "-")
+        .replace("‑", "-")
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace("−", "-")
+    )
+    clean = re.sub(r"[ \t]*,[ \t]*", ",", clean)
+    clean = re.sub(r"[ \t]*-[ \t]*", "-", clean)
+    return clean
+
+
+def parse_id_list(
+    text: Optional[str],
+    allow_zero: bool = False,
+    max_ids: int = MAX_ID_LIST,
+) -> Optional[List[int]]:
+    """R22: پارس فهرست آیدی پیام — چهار فرمت مجاز:
+    «10» (تکی)، «10-15» (بازه)، «10,13,17» (چندتایی)،
+    «10,13-15,17» (ترکیبی).
+
+    خروجی: لیست int به **همان ترتیبی که کاربر تایپ کرده** و بدون تکرار
+    (آیدی تکراری فقط یک‌بار، در اولین جایگاهش). None یعنی نامعتبر یا
+    بیشتر از سقف ``max_ids``.
+    """
+    return _parse_id_list_reason(text, allow_zero, max_ids)[0]
+
+
+def _parse_id_list_reason(
+    text: Optional[str],
+    allow_zero: bool = False,
+    max_ids: int = MAX_ID_LIST,
+) -> Tuple[Optional[List[int]], str]:
+    """مثل parse_id_list ولی دلیل خطا را هم برمی‌گرداند:
+    «» معتبر | «empty» خالی | «format» فرمت نامعتبر | «limit» بیش از سقف."""
+    clean = _clean_id_text(text)
+    if not clean:
+        return None, "empty"
+
+    minimum = 0 if allow_zero else 1
+    ids: List[int] = []
+    seen = set()
+
+    for token in clean.split(","):
+        if not token:
+            return None, "format"
+
+        if "-" in token:
+            parts = token.split("-")
+            if len(parts) != 2:
+                return None, "format"
+            head, tail = parts[0], parts[1]
+            if not (head.isdigit() and tail.isdigit()):
+                return None, "format"
+            start, end = int(head), int(tail)
+            if end < start:
+                return None, "format"
+            if start < minimum:
+                return None, "format"
+            values: Any = range(start, end + 1)
+        else:
+            if not token.isdigit():
+                return None, "format"
+            value = int(token)
+            if value < minimum:
+                return None, "format"
+            values = [value]
+
+        for msg_id in values:
+            if msg_id in seen:
+                continue
+            seen.add(msg_id)
+            ids.append(msg_id)
+            if len(ids) > max_ids:
+                return None, "limit"
+
+    if not ids:
+        return None, "empty"
+    return ids, ""
+
+
+def normalize_id_list_text(text: Optional[str]) -> str:
+    """متن آمادهٔ ذخیره برای فهرست آیدی (ارقام انگلیسی، بدون فاصله).
+    اگر متن نامعتبر باشد فقط پاک‌سازی می‌شود (اعتبارسنجی جدا انجام می‌شود)."""
+    return _clean_id_text(text).replace(" ", "")
+
+
+def format_id_list_error(reason: str) -> str:
+    """پیام خطای مشترک فهرست آیدی بر اساس دلیل پارس."""
+    if reason == "limit":
+        return f"تعداد آیدی‌ها زیاد است (حداکثر {MAX_ID_LIST} آیدی)."
+    return (
+        "فرمت نامعتبر است. فرمت‌های مجاز: 10 (تکی) | 10-15 (بازه) | "
+        "10,13,17 (چندتایی) | 10,13-15,17 (ترکیبی)"
+    )
+
+
 def parse_range(rng: Optional[str]) -> Optional[Tuple[int, int]]:
+    """قدیمی: فقط تکی/بازه. برای فرمت‌های چندتایی/ترکیبی از
+    ``parse_id_list`` استفاده کن (R22)."""
     if not rng:
         return None
 
@@ -121,51 +232,40 @@ def parse_range(rng: Optional[str]) -> Optional[Tuple[int, int]]:
 
 
 def count_range_messages(rng: Optional[str]) -> int:
-    """R14: تعداد پیام‌های (فایل‌های) یک بازه — «803-813» = ۱۱، «100» = ۱."""
-    parsed = parse_range(rng)
-    if not parsed:
+    """R14/R22: تعداد پیام‌های (فایل‌های) یک محدوده.
+    «803-813» = ۱۱، «100» = ۱، «10,13-15» = ۵ (تکراری‌ها یک‌بار)."""
+    ids = parse_id_list(rng)
+    if not ids:
         return 0
-
-    start, end = parsed
-    return end - start + 1
+    return len(ids)
 
 
 def validate_episode_input(text: Optional[str]) -> Tuple[bool, str]:
-    clean_text = normalize_digits((text or "").strip())
+    """R22: قسمت هم چهار فرمت را می‌پذیرد — تکی/بازه/چندتایی/ترکیبی.
+    B17: اپیزود 0 معتبر است (برخی انیمه‌ها قسمت 0/OVA دارند)."""
+    clean_text = _clean_id_text(text)
 
     if not clean_text:
         return False, "قسمت نمی‌تواند خالی باشد."
 
-    if "-" in clean_text:
-        parts = clean_text.split("-")
-        if len(parts) != 2 or not (
-            parts[0].strip().isdigit() and parts[1].strip().isdigit()
-        ):
-            return (
-                False,
-                "فرمت محدوده نامعتبر است. مثال صحیح: 1-12 یا 0-12",
-            )
-
-        start, end = int(parts[0]), int(parts[1])
-        # B17: اپیزود 0 معتبر است (برخی انیمه‌ها قسمت 0/OVA دارند)
-        if start < 0 or end < 0 or end < start:
-            return False, "محدوده قسمت نامعتبر است."
-
-    elif not clean_text.isdigit():
+    _, reason = _parse_id_list_reason(clean_text, allow_zero=True)
+    if reason:
+        if reason == "limit":
+            return False, format_id_list_error(reason)
         return (
             False,
-            "فرمت قسمت نامعتبر است. فقط عدد یا محدوده عددی وارد کن.",
+            "فرمت قسمت نامعتبر است. فرمت‌های مجاز: 2 (تکی) | 1-12 (بازه) | "
+            "1,3,5 (چندتایی) | 1,3-5,8 (ترکیبی)",
         )
 
     return True, ""
 
 
 def validate_channel_input(text: Optional[str]) -> Tuple[bool, str]:
-    if parse_range(text or "") is None:
-        return (
-            False,
-            "فرمت نامعتبر است. مثال صحیح: 100-110 یا 100",
-        )
+    """R22: آیدی/بازه پیام کانال — تکی/بازه/چندتایی/ترکیبی."""
+    _, reason = _parse_id_list_reason(text)
+    if reason:
+        return False, format_id_list_error(reason)
 
     return True, ""
 
@@ -474,6 +574,14 @@ def schedule_delete(
     if not message_ids:
         return None
 
+    # R24: اگر مدت حذف هیچ‌جا تنظیم نشده/صفر باشد، حذف خودکار خاموش است
+    # (قبلاً None به asyncio.sleep می‌رفت و TypeError می‌داد).
+    if not config.DELETE_AFTER_SECONDS:
+        logger.info(
+            "حذف خودکار پیام‌ها غیرفعال است (DELETE_AFTER_SECONDS تنظیم نشده).",
+        )
+        return None
+
     return context.application.create_task(
         _delete_messages_after_delay(
             bot=context.bot,
@@ -481,6 +589,19 @@ def schedule_delete(
             message_ids=message_ids,
             delay=config.DELETE_AFTER_SECONDS,
         ),
+    )
+
+
+def deletion_notice_text() -> str:
+    """R24: متن اطلاع‌رسانی حذف خودکار — وقتی مدت تنظیم نشده، دروغ نگو."""
+    seconds = config.DELETE_AFTER_SECONDS
+    if not seconds:
+        return (
+            "🗑️ حذف خودکار پیام‌ها غیرفعال است "
+            "(مدت حذف را از «⚙️ تنظیمات» تعیین کنید)."
+        )
+    return (
+        f"🗑️ این پیام‌ها پس از {seconds} ثانیه به طور خودکار حذف خواهند شد."
     )
 
 

@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
@@ -8,6 +9,8 @@ from dotenv import load_dotenv
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+
+logger = logging.getLogger(__name__)
 
 
 class Config:
@@ -23,8 +26,12 @@ class Config:
             os.getenv("OWNER_ID")
         )
 
-        self.ADMIN_IDS: List[int] = self._parse_admin_ids(
-            os.getenv("ADMIN_IDS", "")
+        raw_admins = os.getenv("ADMIN_IDS", "")
+        self.ADMIN_IDS: List[int] = self._parse_admin_ids(raw_admins)
+        # R24 (P12): توکن‌های نامعتبر env دور ریخته نمی‌شوند بی‌صدا —
+        # در validate() هشدار داده می‌شوند.
+        self.INVALID_ADMIN_IDS: List[str] = self._invalid_admin_tokens(
+            raw_admins
         )
 
         self.DATABASES: List[Dict[str, Any]] = self._parse_databases(
@@ -42,6 +49,15 @@ class Config:
                 os.getenv("REQUIRED_CHANNELS", "")
             )
         )
+
+    @staticmethod
+    def _invalid_admin_tokens(raw: str) -> List[str]:
+        """R24: بخش‌های ADMIN_IDS که عدد نیستند (تایپو/فاصله/حرف)."""
+        return [
+            part.strip()
+            for part in (raw or "").split(",")
+            if part.strip() and not part.strip().isdigit()
+        ]
 
     @staticmethod
     def _parse_admin_ids(raw: str) -> List[int]:
@@ -133,6 +149,15 @@ class Config:
         return result
 
     def validate(self) -> None:
+        # R24 (P12): آیدی‌های نامعتبر ADMIN_IDS بی‌صدا نادیده گرفته نشوند
+        if self.INVALID_ADMIN_IDS:
+            logger.warning(
+                "⚠️ ADMIN_IDS شامل مقدار نامعتبر بود و این مقادیر حذف "
+                "شدند: %s — فقط آیدی عددی تلگرام معتبر است (بقیهٔ آیدی‌ها "
+                "سالم هستند).",
+                ", ".join(self.INVALID_ADMIN_IDS),
+            )
+
         if (
             not self.BOT_TOKEN
             or self.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE"

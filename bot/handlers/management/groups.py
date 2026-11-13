@@ -135,7 +135,8 @@ async def show_group_list(
             ib(
                 "📛 فهرست اسم‌ها",
                 callback_data="mg_extra:anime",
-                style="primary",
+                # R23: درخواست کاربر — این دکمه سبز شود
+                style="success",
             ),
         ]
     )

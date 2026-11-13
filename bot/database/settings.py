@@ -103,10 +103,28 @@ class SettingsMixin:
         admin_ids = data.get("admin_ids")
 
         if isinstance(admin_ids, list):
-            try:
-                config.ADMIN_IDS = [int(item) for item in admin_ids]
-            except (TypeError, ValueError):
-                logger.warning("admin_ids نامعتبر — نادیده گرفته شد.")
+            # R24 (P12): فیلتر عضو‌به‌عضو — یک مقدار خراب نباید کل لیست
+            # ادمین‌ها را دور بریزد (قبلاً همه‌یا‌هیچی بود).
+            valid_ids: List[int] = []
+            invalid_ids: List[Any] = []
+            for item in admin_ids:
+                try:
+                    value = int(str(item).strip())
+                except (TypeError, ValueError):
+                    invalid_ids.append(item)
+                    continue
+                if value > 0:
+                    valid_ids.append(value)
+                else:
+                    invalid_ids.append(item)
+
+            if invalid_ids:
+                logger.warning(
+                    "admin_ids: %s مقدار نامعتبر حذف شد (فقط آیدی عددی "
+                    "مثبت معتبر است).",
+                    invalid_ids,
+                )
+            config.ADMIN_IDS = valid_ids
 
         channels = data.get("required_channels")
 

@@ -100,6 +100,17 @@ UPLOAD_CANCEL_INLINE = InlineKeyboardMarkup(
     [[ib("لغو آپلود", callback_data="cancel_prompt", style="danger")]]
 )
 
+# R23: تأیید لغو آپلود — دکمه‌های لغو فلؤ آپلود اول می‌پرسند
+# (جلوگیری از لمس اشتباهی). «نه» فقط همین پیام تأیید را می‌بندد.
+CANCEL_CONFIRM_INLINE = InlineKeyboardMarkup(
+    [
+        [
+            ib("✅ بله، لغو کن", style="danger", callback_data="cancel_yes"),
+            ib("❌ نه، ادامه بده", style="primary", callback_data="cancel_no"),
+        ]
+    ]
+)
+
 CANCEL_MENU = ReplyKeyboardMarkup(
     [[KeyboardButton("لغو آپلود", style="danger")]],
     resize_keyboard=True,
@@ -186,7 +197,10 @@ def settings_panel_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 ib(
-                    "🔄 به‌روزرسانی", callback_data="st:panel"
+                    # R23: همهٔ دکمه‌های به‌روزرسانی آبی
+                    "🔄 به‌روزرسانی",
+                    style="primary",
+                    callback_data="st:panel",
                 ),
                 ib(
                     "🔙 بازگشت", callback_data="st:back"
@@ -199,12 +213,23 @@ def settings_panel_keyboard() -> InlineKeyboardMarkup:
 def settings_admins_keyboard(
     admin_ids: List[int],
     owner_id: Optional[int],
+    names: Optional[dict] = None,
 ) -> InlineKeyboardMarkup:
+    """R23: دو ستون — چپ آیدی عددی، راست اسم اکانت (هر دو آبی و هر
+    دو به همان تأیید حذف می‌رسند)."""
+    names = names or {}
     rows = [
         [
             ib(
-                f"❌ {admin_id}", callback_data=f"st:adm_del:{admin_id}"
-            )
+                str(admin_id),
+                style="primary",
+                callback_data=f"st:adm_del:{admin_id}",
+            ),
+            ib(
+                names.get(admin_id) or names.get(str(admin_id)) or "—",
+                style="primary",
+                callback_data=f"st:adm_del:{admin_id}",
+            ),
         ]
         for admin_id in admin_ids
         if owner_id is None or admin_id != owner_id
@@ -218,15 +243,33 @@ def settings_admins_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def settings_channels_keyboard(channels: List) -> InlineKeyboardMarkup:
+def settings_channels_keyboard(
+    channels: List,
+    names: Optional[dict] = None,
+) -> InlineKeyboardMarkup:
+    """R23: دو ستون — چپ آیدی عددی، راست اسم کانال (هر دو آبی)."""
+    names = names or {}
     rows = []
     for idx, channel in enumerate(channels):
         label = str(channel)
+        id_text = label if label.lstrip("-").isdigit() else "—"
+        name_text = (
+            names.get(str(channel))
+            or names.get(channel)
+            or (label if not label.lstrip("-").isdigit() else "—")
+        )
         rows.append(
             [
                 ib(
-                    f"❌ {label}", callback_data=f"st:ch_del:{idx}"
-                )
+                    id_text,
+                    style="primary",
+                    callback_data=f"st:ch_del:{idx}",
+                ),
+                ib(
+                    name_text,
+                    style="primary",
+                    callback_data=f"st:ch_del:{idx}",
+                ),
             ]
         )
     rows.append(
@@ -242,23 +285,14 @@ def settings_duration_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                ib(
-                    "5 دقیقه", callback_data="st:dur:300"
-                ),
-                ib(
-                    "10 دقیقه", callback_data="st:dur:600"
-                ),
-                ib(
-                    "30 دقیقه", callback_data="st:dur:1800"
-                ),
+                # R23: همهٔ پیش‌فرض‌های زمان حذف آبی
+                ib("5 دقیقه", style="primary", callback_data="st:dur:300"),
+                ib("10 دقیقه", style="primary", callback_data="st:dur:600"),
+                ib("30 دقیقه", style="primary", callback_data="st:dur:1800"),
             ],
             [
-                ib(
-                    "1 ساعت", callback_data="st:dur:3600"
-                ),
-                ib(
-                    "24 ساعت", callback_data="st:dur:86400"
-                ),
+                ib("1 ساعت", style="primary", callback_data="st:dur:3600"),
+                ib("24 ساعت", style="primary", callback_data="st:dur:86400"),
             ],
             [
                 ib(
@@ -278,7 +312,9 @@ def settings_databases_keyboard(databases: List[dict]) -> InlineKeyboardMarkup:
     rows = [
         [
             ib(
+                # R23: دکمه‌های دیتابیس سفارشی آبی
                 f"❌ {row['name']}",
+                style="primary",
                 callback_data=f"st:db_del:{row['id']}",
             )
         ]
@@ -308,7 +344,8 @@ def settings_confirm_keyboard(
                 ib(
                     "✅ بله، حذف کن", callback_data=yes_callback
                 ),
-                ib("❌ خیر", callback_data=no_callback),
+                # R23b: «خیر» آبی (درخواست کاربر)
+                ib("❌ خیر", style="primary", callback_data=no_callback),
             ]
         ]
     )
@@ -517,6 +554,14 @@ def season_other_keyboard() -> InlineKeyboardMarkup:
             ib(s, callback_data=f"sn_other:{s}", style="primary")
             for s in OTHER_SEASONS
         ],
+        # R23: از «سایر» هم می‌توان به انتخاب عددی فصل برگشت
+        [
+            ib(
+                "◀️ بازگشت به انتخاب عدد",
+                style="success",  # R23b: سبز (درخواست کاربر)
+                callback_data="sn_back",
+            )
+        ],
         [ib("لغو آپلود", callback_data="cancel_prompt", style="danger")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -548,10 +593,11 @@ def quality_multiselect_keyboard(
     keyboard.append(
         [
             ib(
+                # R23: روشن ⇒ ✅ ، خاموش ⇒ ❌ (درخواست کاربر)
                 (
                     "✅ بلوری (Blu-ray)"
                     if bluray
-                    else "🖨 بلوری (Blu-ray)"
+                    else "❌ بلوری (Blu-ray)"
                 ),
                 callback_data="bluray_toggle",
                 style="primary",
@@ -693,7 +739,9 @@ def build_pagination_row(
 
     row.append(
         ib(
+            # R23: همهٔ دکمه‌های به‌روزرسانی/تازه‌سازی آبی
             "🔄",
+            style="primary",
             callback_data=refresh_callback,
         )
     )

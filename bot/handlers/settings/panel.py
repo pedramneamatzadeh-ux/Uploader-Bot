@@ -32,7 +32,21 @@ from ...keyboards import (
 )
 from ...utils import go_to_main_menu, normalize_digits, register_panel_message
 
-from .common import _MAX_DURATION_SECONDS, _admins_text, _channels_text, _dbs_text, _duration_text, _panel_text, _safe_edit, _show_prompt, _show_section, _store_prompt
+from .common import (
+    _MAX_DURATION_SECONDS,
+    _admin_names,
+    _admins_text,
+    _channel_titles,
+    _channels_text,
+    ensure_channel_titles,
+    _dbs_text,
+    _duration_text,
+    _panel_text,
+    _safe_edit,
+    _show_prompt,
+    _show_section,
+    _store_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,16 +126,21 @@ async def _dispatch_settings(context, query) -> int:
             context, query,
             _admins_text(),
             settings_admins_keyboard(
-                list(config.ADMIN_IDS or []), config.OWNER_ID
+                list(config.ADMIN_IDS or []),
+                config.OWNER_ID,
+                names=_admin_names(),  # R23: دو ستون آیدی/اسم
             ),
         )
 
     if action == "channels":
+        # R23b: برای کانال‌های قدیمی، عنوان را از تلگرام می‌گیرد
+        titles = await ensure_channel_titles(context)
         return await _show_section(
             context, query,
             _channels_text(),
             settings_channels_keyboard(
-                list(config.REQUIRED_CHANNELS or [])
+                list(config.REQUIRED_CHANNELS or []),
+                names=titles,  # R23: دو ستون آیدی/اسم
             ),
         )
 
@@ -158,7 +177,9 @@ async def _dispatch_settings(context, query) -> int:
             context, query,
             text,
             settings_admins_keyboard(
-                list(config.ADMIN_IDS or []), config.OWNER_ID
+                list(config.ADMIN_IDS or []),
+                config.OWNER_ID,
+                names=_admin_names(),  # R23: دو ستون آیدی/اسم
             ),
         )
 
@@ -195,7 +216,8 @@ async def _dispatch_settings(context, query) -> int:
             context, query,
             text,
             settings_channels_keyboard(
-                list(config.REQUIRED_CHANNELS or [])
+                list(config.REQUIRED_CHANNELS or []),
+                names=await ensure_channel_titles(context),
             ),
         )
 

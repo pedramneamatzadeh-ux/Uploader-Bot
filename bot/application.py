@@ -129,6 +129,8 @@ from .handlers.stats import handle_stats_callback, show_stats
 from .handlers.upload import (
     cancel_from_inline,
     cancel_upload,
+    confirm_cancel_no,
+    confirm_cancel_yes,
     confirm_upload,
     movie_num_callback,
     multi_quality_channel_range,
@@ -210,7 +212,7 @@ def _build_upload_conversation() -> ConversationHandler:
             SEASON_NUM: [
                 CallbackQueryHandler(
                     season_callback,
-                    pattern=r"^(sn:\d+|sn:other|sn_other:[A-Za-z]+)$",
+                    pattern=r"^(sn:\d+|sn:other|sn_back|sn_other:[A-Za-z]+)$",
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_season_num),
             ],
@@ -251,6 +253,13 @@ def _build_upload_conversation() -> ConversationHandler:
             CallbackQueryHandler(
                 cancel_from_inline,
                 pattern=r"^(dbsel_cancel|cancel_multi|cancel_prompt)$",
+            ),
+            # R23: تأیید/انصراف لغو آپلود
+            CallbackQueryHandler(
+                confirm_cancel_yes, pattern=r"^cancel_yes$"
+            ),
+            CallbackQueryHandler(
+                confirm_cancel_no, pattern=r"^cancel_no$"
             ),
         ],
         allow_reentry=True,
@@ -464,6 +473,13 @@ def _build_management_conversation() -> ConversationHandler:
             CallbackQueryHandler(
                 cancel_from_inline,
                 pattern=r"^(dbsel_cancel|cancel_multi|cancel_prompt)$",
+            ),
+            # R23: تأیید/انصراف لغو آپلود
+            CallbackQueryHandler(
+                confirm_cancel_yes, pattern=r"^cancel_yes$"
+            ),
+            CallbackQueryHandler(
+                confirm_cancel_no, pattern=r"^cancel_no$"
             ),
         ],
         allow_reentry=True,

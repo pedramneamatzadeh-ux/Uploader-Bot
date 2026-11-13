@@ -34,6 +34,7 @@ from ...utils import (
     fmt_tehran,
     get_database_name,
     go_to_main_menu,
+    normalize_id_list_text,
     normalize_optional_text,
     parse_range,
     safe_edit_or_send,
@@ -93,7 +94,7 @@ async def handle_edit_input(
         valid, error = validate_anime_name(text)
         if not valid:
             await update.message.reply_text(
-                f"❌ {error}\nدوباره وارد کن یا /cancel را تایپ کن."
+                f"❌ {error}\nدوباره وارد کن یا دکمهٔ «◀️ بازگشت» را بزن."
             )
             return MANAGE_EDIT
 
@@ -134,7 +135,7 @@ async def handle_edit_input(
             if text == old_alias:
                 await update.message.reply_text(
                     "نام جدید با نام ظاهری فعلی یکسان است.\n"
-                    "نام دیگری وارد کن یا /cancel را تایپ کن."
+                    "نام دیگری وارد کن یا دکمهٔ «◀️ بازگشت» را بزن."
                 )
                 return MANAGE_EDIT
 
@@ -144,7 +145,7 @@ async def handle_edit_input(
                 await update.message.reply_text(
                     "❌ این نام با نام ظاهری گروه فعلی یکی است —\n"
                     "برای جداسازی نام متفاوتی وارد کن "
-                    "یا /cancel را تایپ کن."
+                    "یا دکمهٔ «◀️ بازگشت» را بزن."
                 )
                 return MANAGE_EDIT
 
@@ -177,7 +178,7 @@ async def handle_edit_input(
         if len(members) == 1 and text == members[0]:
             await update.message.reply_text(
                 "نام جدید با نام فعلی یکسان است.\n"
-                "نام دیگری وارد کن یا /cancel را تایپ کن."
+                "نام دیگری وارد کن یا دکمهٔ «◀️ بازگشت» را بزن."
             )
             return MANAGE_EDIT
 
@@ -238,7 +239,7 @@ async def handle_edit_input(
         valid, error = validate_channel_input(text)
         if not valid:
             await update.message.reply_text(
-                f"❌ {error}\nدوباره وارد کن یا /cancel را تایپ کن."
+                f"❌ {error}\nدوباره وارد کن یا دکمهٔ «◀️ بازگشت» را بزن."
             )
             return MANAGE_EDIT
 
@@ -261,7 +262,8 @@ async def handle_edit_input(
             "part_num": ref.get("part_num"),
             "episode_range": ref["episode_range"],
             "quality": quality,
-            "channel_msg_range": text,
+            # R22: ذخیرهٔ یکدست متن آیدی‌ها
+            "channel_msg_range": normalize_id_list_text(text),
             "is_ongoing": ref.get("is_ongoing", 0),
             "ongoing_anime_id": ref.get("ongoing_anime_id"),
             "anime_type": ref.get("anime_type", ""),
@@ -327,7 +329,7 @@ async def handle_edit_input(
         valid, error = validate_anime_name(text)
         if not valid:
             await update.message.reply_text(
-                f"❌ {error}\nدوباره وارد کن یا /cancel را تایپ کن."
+                f"❌ {error}\nدوباره وارد کن یا دکمهٔ «◀️ بازگشت» را بزن."
             )
             return MANAGE_EDIT
 
@@ -341,7 +343,7 @@ async def handle_edit_input(
         if text == inherited and not own:
             await update.message.reply_text(
                 "❌ این همان نام ظاهری ارثی فصل است — برای جداسازی این "
-                "لینک نام متفاوتی وارد کن (یا /cancel)."
+                "لینک نام متفاوتی وارد کن (یا دکمهٔ «◀️ بازگشت» را بزن)."
             )
             return MANAGE_EDIT
 
@@ -377,11 +379,14 @@ async def handle_edit_input(
 
     if not valid:
         await update.message.reply_text(
-            f"❌ {error}\nدوباره وارد کن یا /cancel را تایپ کن."
+            f"❌ {error}\nدوباره وارد کن یا دکمهٔ «◀️ بازگشت» را بزن."
         )
         return MANAGE_EDIT
 
-    if field == "part":
+    if field in ("channel", "episode"):
+        # R22: یکدست‌سازی فهرست آیدی‌ها/قسمت‌ها هنگام ذخیره
+        text = normalize_id_list_text(text)
+    elif field == "part":
         text = normalize_optional_text(text)
     elif field == "season":
         # R19b: تایپ «ندارد» برای *شمارهٔ سینمایی* ⇒ خالی (مثل دکمهٔ

@@ -6,13 +6,13 @@ from telegram import InlineKeyboardMarkup, Update
 from telegram.error import RetryAfter, TelegramError
 from telegram.ext import ContextTypes
 
-from ..config import config
 from ..constants import Msg
 from ..database import db
 from ..keyboards import ib
 from ..utils import (
+    deletion_notice_text,
     get_default_channel_chat_id,
-    parse_range,
+    parse_id_list,
     schedule_delete,
     track_user,
 )
@@ -59,8 +59,9 @@ async def deliver_files_for_session(
         except TelegramError:
             pass
 
-    rng = parse_range(upload_data.get("channel_msg_range"))
-    if not rng:
+    # R22: فهرست آیدی‌ها با ترتیب تایپ کاربر و بدون تکرار
+    msg_ids = parse_id_list(upload_data.get("channel_msg_range"))
+    if not msg_ids:
         await message.reply_text(Msg.INVALID_RANGE)
         return True
 
@@ -90,14 +91,13 @@ async def deliver_files_for_session(
         await message.reply_text(Msg.CHANNEL_UNREACHABLE)
         return True
 
-    start_id, end_id = rng
     prep_msg = await message.reply_text(Msg.PREPARING)
 
     sent_count = 0
     failed_ids = []
     sent_message_ids = [prep_msg.message_id]
 
-    for msg_id in range(start_id, end_id + 1):
+    for msg_id in msg_ids:
         # P10: در صورت RetryAfter صبر کن و یک‌بار تلاش مجدد
         for attempt in (1, 2):
             try:
@@ -179,9 +179,7 @@ async def deliver_files_for_session(
             reply_markup=report_kb,
         )
 
-        info_msg = await message.reply_text(
-            f"🗑️ این پیام‌ها پس از {config.DELETE_AFTER_SECONDS} ثانیه به طور خودکار حذف خواهند شد."
-        )
+        info_msg = await message.reply_text(deletion_notice_text())
         sent_message_ids.append(info_msg.message_id)
 
         schedule_delete(context, chat.id, sent_message_ids)
@@ -202,9 +200,19 @@ async def deliver_files_for_session(
             )[final_msg.message_id] = keep_task
 
     if failed_ids:
-        await message.reply_text(
+        # R22: با فهرست‌های بلند، پیام از سقف تلگرام رد نشود
+        shown = failed_ids[:50]
+        rest = len(failed_ids) - len(shown)
+        header = (
             "⚠️ بعضی پیام‌ها ارسال نشدند. لطفاً آیدی‌های زیر را بررسی کن:\n"
-            + ", ".join(str(mid) for mid in failed_ids)
+        )
+        if rest > 0:
+            header = (
+                f"⚠️ {len(failed_ids)} پیام ارسال نشد. ۵۰ آیدی اول:\n"
+            )
+        await message.reply_text(
+            header + ", ".join(str(mid) for mid in shown)
+            + (f"\n… و {rest} آیدی دیگر" if rest > 0 else "")
         )
 
     return True
@@ -309,9 +317,7 @@ async def deliver_post_for_session(
         )
         sent_message_ids.append(final_msg.message_id)
 
-        info_msg = await message.reply_text(
-            f"🗑️ این پیام‌ها پس از {config.DELETE_AFTER_SECONDS} ثانیه به طور خودکار حذف خواهند شد."
-        )
+        info_msg = await message.reply_text(deletion_notice_text())
         sent_message_ids.append(info_msg.message_id)
 
         schedule_delete(context, chat.id, sent_message_ids)
@@ -398,10 +404,7 @@ async def deliver_summary_for_session(
         sent_message_ids.append(text_msg.message_id)
 
     if sent_message_ids:
-        info_msg = await message.reply_text(
-            f"🗑️ این پیام‌ها پس از {config.DELETE_AFTER_SECONDS} ثانیه "
-            "به طور خودکار حذف خواهند شد."
-        )
+        info_msg = await message.reply_text(deletion_notice_text())
         sent_message_ids.append(info_msg.message_id)
         schedule_delete(context, chat.id, sent_message_ids)
 

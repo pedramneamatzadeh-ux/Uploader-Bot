@@ -45,6 +45,7 @@ from ...utils import (
     go_to_main_menu,
     register_panel_message,
     normalize_digits,
+    normalize_id_list_text,
     normalize_optional_text,
     validate_anime_name,
     validate_channel_input,
@@ -57,6 +58,7 @@ from .common import (
     EPISODE_QUESTION_TEXT,
     MULTISELECT_PROMPT,
     _SEASON_TEXT_PATTERN,
+    SEASON_QUESTION_TEXT,
     _part_question_text,
     clear_question_message,
     close_question_message,
@@ -172,6 +174,15 @@ async def season_callback(
         return SEASON_NUM
 
     await query.answer()
+
+    if query.data == "sn_back":
+        # R23: از زیرصفحهٔ «سایر» به انتخاب عددی فصل برگشت
+        await query.edit_message_text(
+            SEASON_QUESTION_TEXT,
+            reply_markup=season_keyboard(),
+        )
+        set_question_message(context, query.message.message_id)
+        return SEASON_NUM
 
     if query.data == "sn:other":
         # R17: زیرصفحهٔ «سایر» — دکمه‌های OVA/ONA/Special + تایپ دستی
@@ -366,6 +377,8 @@ async def receive_episode_range(
         )
         return EPISODE_RANGE
 
+    # R22: ذخیرهٔ یکدست (ارقام انگلیسی، بدون فاصله)
+    text = normalize_id_list_text(text)
     context.user_data["episode_range"] = text
 
     # R18: سؤال محدودهٔ قسمت‌ها بسته + پیام جواب پاک می‌شود

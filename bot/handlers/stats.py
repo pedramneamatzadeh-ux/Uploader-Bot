@@ -400,26 +400,44 @@ async def show_reports_stats(
     lines.append(f"\n📄 صفحه {page + 1} از {pages}")
 
     keyboard = []
-    if only_pending:
-        keyboard.append([ib("📋 همه گزارش‌ها", callback_data="stats_reports_filter:all")])
-    else:
-        keyboard.append([ib("⏳ فقط در انتظار", callback_data="stats_reports_filter:pending")])
 
     # R8c: «حل شد» + «جزئیات» در یک ردیف برای هر گزارش
     for report in page_reports:
         row = []
         if report["status"] == "pending":
             row.append(
-                ib(f"✅ حل شد #{report['id']}", callback_data=(
+                ib(
+                    f"✅ حل شد #{report['id']}",
+                    style="primary",  # R23: دکمه‌های گزارش آبی
+                    callback_data=(
                         f"resolve_report:{report['id']}:{page}:{f}"
-                    ))
+                    ),
+                )
             )
         row.append(
-            ib(f"🔍 جزئیات #{report['id']}", callback_data=(
+            ib(
+                f"🔍 جزئیات #{report['id']}",
+                style="primary",  # R23: دکمه‌های گزارش آبی
+                callback_data=(
                     f"report_detail:{report['id']}:{page}:{f}"
-                ))
+                ),
+            )
         )
         keyboard.append(row)
+
+    # R23b: کلید فیلتر درست بالای ردیف قبلی/بعدی/تازه‌سازی و سبز
+    if only_pending:
+        keyboard.append([ib(
+            "📋 همه گزارش‌ها",
+            style="success",
+            callback_data="stats_reports_filter:all",
+        )])
+    else:
+        keyboard.append([ib(
+            "⏳ فقط در انتظار",
+            style="success",
+            callback_data="stats_reports_filter:pending",
+        )])
 
     nav = build_pagination_row(
         page,
@@ -723,7 +741,11 @@ async def show_db_stats(chat_id, context, message_id=None):
             ),
         ],
         [
-            ib("🔄 تازه‌سازی", callback_data="stats_db"),
+            ib(
+                "🔄 تازه‌سازی",
+                style="primary",  # R23: تازه‌سازی آبی
+                callback_data="stats_db",
+            ),
             ib("◀️ بازگشت", callback_data="stats_back"),
         ],
     ]
@@ -942,7 +964,11 @@ async def show_upload_stats(chat_id, context, message_id=None):
 
     keyboard = [
         [
-            ib("🔄 تازه‌سازی", callback_data="stats_uploads"),
+            ib(
+                "🔄 تازه‌سازی",
+                style="primary",  # R23: تازه‌سازی آبی
+                callback_data="stats_uploads",
+            ),
             ib("◀️ بازگشت", callback_data="stats_back"),
         ],
     ]
