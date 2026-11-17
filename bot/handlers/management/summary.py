@@ -2,20 +2,28 @@
 
 import html
 import logging
+import re
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
+from ...config import config
 from ...constants import (
     MANAGE_SUMMARY_PHOTO,
+    MANAGE_SUMMARY_PHOTO_ID,
     MANAGE_SUMMARY_TEXT,
+    Msg,
 )
 from ...database import db
 from ...decorators import admin_only
 from ...keyboards import ib
+from ...services.delivery import send_summary_photo
 from ...utils import (
     build_download_link,
     fmt_tehran,
+    get_default_channel_chat_id,
+    normalize_digits,
     safe_edit_or_send,
 )
 from .common import _level_state, _manage
@@ -25,6 +33,114 @@ logger = logging.getLogger(__name__)
 
 # محدودیت طول متن (پنل باید در ۴۰۹۶ نویسه تلگرام جا شود)
 MAX_SUMMARY_LEN = 3700
+
+
+def get_summary_photo_chats() -> list:
+    """R34: فهرست کانال‌های عکس خلاصه (خالی ⇒ کانال فایل‌ها)."""
+    chats = list(getattr(config, "SUMMARY_PHOTO_CHATS", None) or [])
+    if not chats and getattr(config, "SUMMARY_PHOTO_CHAT", None):
+        chats = [config.SUMMARY_PHOTO_CHAT]
+    return chats
+
+
+def _channel_choice_rows(chats: list) -> list:
+    """R34: دکمهٔ هر کانال برای انتخاب هنگام ثبت عکس."""
+    try:
+        titles = db.get_setting("summary_photo_chat_titles", {}) or {}
+    except Exception:
+        titles = {}
+    if not isinstance(titles, dict):
+        titles = {}
+    rows = []
+    for chat in chats:
+        label = titles.get(str(chat)) or str(chat)
+        rows.append(
+            [
+                ib(
+                    f"🖼️ {label}",
+                    callback_data=f"mg_sum_ch:{int(chat)}",
+                    style="primary",
+                )
+            ]
+        )
+    return rows
+
+
+async def _ask_photo_id(context, manage, query, channel):
+    """R34: پرامپت گرفتن آیدی/لینک پیام عکس از کانال انتخاب‌شده."""
+    manage["summary_wait"] = "photo_id"
+    manage["photo_chat"] = int(channel) if channel is not None else None
+    context.user_data["manage"] = manage
+    if channel is not None:
+        where = f"کانال انتخاب‌شده: <code>{int(channel)}</code>"
+    else:
+        where = (
+            "⚠️ کانالی ثبت نشده — فعلاً از 📁 کانال فایل‌ها استفاده "
+            "می‌شود. برای کانال‌های دیگر: «⚙️ تنظیمات → 🖼️ کانال‌های "
+            "عکس خلاصه»."
+        )
+    await query.edit_message_text(
+        f"🖼️ {Msg.SUMMARY_PHOTO_ID_PROMPT}\n\n{where}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [ib("🔙 بازگشت به خلاصه", callback_data="mg_sum")]
+            ]
+        ),
+    )
+    return MANAGE_SUMMARY_PHOTO_ID
+
+
+def _has_photo(summary: dict) -> bool:
+    """R33: خلاصه عکس دارد؟ (کانالی یا file_id قدیمی)"""
+    if not summary:
+        return False
+    if str(summary.get("photo_chat_id") or "").strip() and summary.get("photo_msg_id"):
+        return True
+    return bool(summary.get("photo_file_id"))
+
+
+def _photo_state(summary: dict) -> str:
+    """R33: وضعیت خوانا برای پنل خلاصه."""
+    if not summary:
+        return "❌ ندارد"
+    if str(summary.get("photo_chat_id") or "").strip() and summary.get("photo_msg_id"):
+        return (
+            f"✅ از کانال <code>{summary['photo_chat_id']}</code> "
+            f"(پیام {summary['photo_msg_id']})"
+        )
+    if summary.get("photo_file_id"):
+        return "✅ دارد (file_id قدیمی)"
+    return "❌ ندارد"
+
+
+def parse_photo_ref(text: str, default_chat=None):
+    """R33: «لینک پیام» یا «شمارهٔ پیام» ⇒ (chat_id, msg_id) یا None.
+
+    پشتیبانی از:
+      • https://t.me/<name>/123  و  https://t.me/c/1234567890/123
+      • شمارهٔ خالص: 1245  ⇒ کانال پیش‌فرض
+    """
+    raw = normalize_digits((text or "").strip())
+    if not raw:
+        return None
+
+    link = re.search(
+        r"(?:t\.me|telegram\.me)/(?:c/)?([A-Za-z0-9_\-]+)/(\d+)",
+        raw,
+    )
+    if link:
+        target, msg_id = link.group(1), int(link.group(2))
+        if target.lstrip("-").isdigit():
+            chat = int(f"-100{target}")
+        else:
+            chat = f"@{target}"
+        return chat, msg_id
+
+    if re.fullmatch(r"\d+", raw) and default_chat:
+        return int(default_chat), int(raw)
+
+    return None
 
 
 def _summary_ref(manage: dict) -> tuple:
@@ -48,6 +164,25 @@ def _summary_ref(manage: dict) -> tuple:
         if part:
             label += f" | پارت {part}"
     return name, season, part, label
+
+
+def _usable_photo_id(photo):
+    """R32: فایل‌آیدی امن‌ترین سایز عکس آپلودشده.
+
+    اگر پیام به‌صورت «فایل» (document) فرستاده شده باشد، `photo` خالی
+    است؛ در آن حالت None برمی‌گردد تا فایل‌آیدلی ذخیره نشود که بعداً
+    با خطای «Wrong file identifier/http url specified» رد شود.
+    """
+    if not photo:
+        return None
+    sizes = [
+        item
+        for item in photo
+        if isinstance(getattr(item, "file_id", None), str) and item.file_id
+    ]
+    if not sizes:
+        return None
+    return sizes[-1].file_id
 
 
 async def _show_panel(
@@ -84,8 +219,7 @@ async def _show_panel(
             "",
             html.escape(summary.get("summary_text") or ""),
             "",
-            "🖼️ عکس: "
-            + ("✅ دارد" if summary.get("photo_file_id") else "❌ ندارد"),
+            "🖼️ عکس: " + _photo_state(summary),
             f"📅 به‌روزرسانی: {fmt_tehran(summary.get('updated_at'))}",
         ]
         if share_link:
@@ -106,7 +240,7 @@ async def _show_panel(
                 ),
             ]
         ]
-        if summary.get("photo_file_id"):
+        if _has_photo(summary):
             keyboard.append(
                 [
                     ib(
@@ -174,28 +308,33 @@ async def handle_summary_callback(
         return MANAGE_SUMMARY_TEXT
 
     if data == "mg_sum_photo":
-        manage["summary_wait"] = "photo"
-        context.user_data["manage"] = manage
-        await query.edit_message_text(
-            f"🖼️ عکس خلاصه (پوستر فصل) را بفرست:\n\n{label}\n\n"
-            "عکس جایگزین عکس قبلی می‌شود.",
-            reply_markup=InlineKeyboardMarkup(
-                [
-                    [
-                        ib(
-                            "🔙 بازگشت به خلاصه",
-                            callback_data="mg_sum",
-                        )
-                    ]
-                ]
-            ),
-        )
-        return MANAGE_SUMMARY_PHOTO
+        # R34: اگر چند کانال عکس ثبت شده باشد، اول کانال انتخاب می‌شود
+        chats = get_summary_photo_chats()
+        if len(chats) > 1:
+            await query.edit_message_text(
+                Msg.SUMMARY_PHOTO_PICK_CHANNEL,
+                reply_markup=InlineKeyboardMarkup(
+                    _channel_choice_rows(chats)
+                    + [[ib("🔙 بازگشت به خلاصه", callback_data="mg_sum")]]
+                ),
+            )
+            return origin
+        return await _ask_photo_id(context, manage, query, chats[0] if chats else None)
+
+    if data.startswith("mg_sum_ch:"):
+        raw = data.split(":", 1)[1]
+        try:
+            channel = int(raw)
+        except ValueError:
+            channel = None
+        if channel is None:
+            await query.answer(Msg.SUMMARY_PHOTO_CHANNEL_INVALID, show_alert=True)
+            return origin
+        return await _ask_photo_id(context, manage, query, channel)
 
     if data == "mg_sum_show":
         summary = db.get_season_summary(name, season, part)
-        file_id = summary.get("photo_file_id") if summary else None
-        if not file_id:
+        if not summary or not _has_photo(summary):
             await query.answer(
                 "❌ عکسی ثبت نشده است.", show_alert=True
             )
@@ -207,8 +346,11 @@ async def handle_summary_callback(
             if len(body) > 1000:
                 caption += "…"
         try:
-            await context.bot.send_photo(
-                chat_id=chat_id, photo=file_id, caption=caption
+            await send_summary_photo(
+                context.bot,
+                chat_id,
+                summary,
+                html.escape(caption) if caption else None,
             )
         except Exception:
             logger.warning("ارسال عکس خلاصه ناموفق بود", exc_info=True)
@@ -227,14 +369,7 @@ async def handle_summary_callback(
                 "❌ عکسی ثبت نشده است.", show_alert=True
             )
             return await _show_panel(chat_id, context, manage)
-        db.set_season_summary(
-            name,
-            season,
-            summary.get("summary_text") or "",
-            photo_file_id=None,
-            created_by=summary.get("created_by"),
-            part_num=part,
-        )
+        db.set_summary_photo(summary.get("id"), None, None, None)
         await query.answer("🖼️ عکس حذف شد؛ متن خلاصه باقی است.")
         return await _show_panel(chat_id, context, manage)
 
@@ -350,16 +485,93 @@ async def handle_summary_photo(
         )
         return await _show_panel(chat_id, context, manage)
 
-    file_id = update.message.photo[-1].file_id
-    db.set_season_summary(
-        name,
-        _season,
-        current.get("summary_text") or "",
-        photo_file_id=file_id,
-        created_by=current.get("created_by") or update.effective_user.id,
-        part_num=_part,
-    )
+    file_id = _usable_photo_id(update.message.photo)
+    if not file_id:
+        await update.message.reply_text(
+            "❌ این عکس قابل استفاده نیست؛ آن را دوباره (به صورت عکس، "
+            "نه فایل) بفرست."
+        )
+        return MANAGE_SUMMARY_PHOTO
+    # R33: عکس کانالی اولویت دارد و file_id قدیمی پاک می‌شود
+    db.set_summary_photo(current.get("id"), None, None, file_id)
     manage.pop("summary_wait", None)
     context.user_data["manage"] = manage
     await update.message.reply_text("✅ عکس خلاصه ذخیره شد.")
+    return await _show_panel(chat_id, context, manage)
+
+
+@admin_only
+async def handle_summary_photo_id(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    """R33: دریافت «لینک پیام» یا «شمارهٔ پیام» عکس خلاصه در کانال.
+
+    عکس با کپی از کانال ارسال می‌شود؛ بنابراین با عوض‌شدن توکن ربات هم
+    تا وقتی ربات عضو آن کانال باشد کار می‌کند.
+    """
+    manage = _manage(context)
+    message = update.message
+    chat_id = message.chat_id
+    name, _season, _part, _label = _summary_ref(manage)
+
+    current = db.get_season_summary(name, _season, _part)
+    if not current:
+        await message.reply_text(
+            "❌ اول متن خلاصه را ثبت کن، بعد عکس را وصل کن."
+        )
+        return await _show_panel(chat_id, context, manage)
+
+    default_chat = (
+        manage.get("photo_chat")
+        or config.SUMMARY_PHOTO_CHAT
+        or get_default_channel_chat_id()
+    )
+    ref = parse_photo_ref(message.text or "", default_chat)
+    if ref is None:
+        await message.reply_text(Msg.SUMMARY_PHOTO_ID_INVALID)
+        return MANAGE_SUMMARY_PHOTO_ID
+
+    photo_chat, photo_msg = ref
+    if photo_chat is None:
+        await message.reply_text(Msg.SUMMARY_PHOTO_CHANNEL_MISSING)
+        return MANAGE_SUMMARY_PHOTO_ID
+
+    # اگر کانال با @username داده شده، به آیدی عددی تبدیل می‌شود
+    if isinstance(photo_chat, str):
+        try:
+            resolved = await context.bot.get_chat(photo_chat)
+        except TelegramError as err:
+            logger.warning("کانال عکس %s شناسایی نشد: %s", photo_chat, err)
+            await message.reply_text(Msg.CHANNEL_CHECK_FAILED)
+            return MANAGE_SUMMARY_PHOTO_ID
+        photo_chat = resolved.id
+
+    # اعتبارسنجی: همان پیام واقعاً عکس دارد و ربات می‌تواند کپی کند
+    try:
+        await context.bot.copy_message(
+            chat_id=chat_id,
+            from_chat_id=photo_chat,
+            message_id=photo_msg,
+        )
+    except TelegramError as err:
+        logger.warning(
+            "کپی آزمایشی عکس خلاصه %s/%s ناموفق: %s",
+            photo_chat,
+            photo_msg,
+            err,
+        )
+        await message.reply_text(
+            "❌ این پیام قابل کپی نیست (عکس نیست یا ربات دسترسی ندارد).\n"
+            "آیدی یا لینک دیگری بفرست."
+        )
+        return MANAGE_SUMMARY_PHOTO_ID
+
+    db.set_summary_photo(
+        current.get("id"), photo_chat, photo_msg, photo_file_id=None
+    )
+    manage.pop("summary_wait", None)
+    manage.pop("photo_chat", None)
+    context.user_data["manage"] = manage
+    await message.reply_text(Msg.SUMMARY_PHOTO_SET)
     return await _show_panel(chat_id, context, manage)

@@ -55,6 +55,11 @@ class SettingsMixin:
             "admin_ids": config.ADMIN_IDS or None,
             "required_channels": config.REQUIRED_CHANNELS or None,
             "delete_after_seconds": config.DELETE_AFTER_SECONDS,
+            "delete_after_seconds_posts": config.DELETE_AFTER_SECONDS_POSTS,
+            "delete_after_seconds_panel": config.DELETE_AFTER_SECONDS_PANEL,
+            "delete_after_seconds_summary": config.DELETE_AFTER_SECONDS_SUMMARY,
+            "summary_photo_chat": config.SUMMARY_PHOTO_CHAT,
+            "summary_photo_chats": config.SUMMARY_PHOTO_CHATS or None,
         }
 
         for key, value in env_values.items():
@@ -131,12 +136,56 @@ class SettingsMixin:
         if isinstance(channels, list):
             config.REQUIRED_CHANNELS = channels
 
-        delete_after = data.get("delete_after_seconds")
+        # R34: لیست کانال‌های عکس خلاصه (تک‌مقدار قدیمی هم پذیرفته می‌شود)
+        if "summary_photo_chats" in data:
+            raw = data.get("summary_photo_chats") or []
+            if isinstance(raw, (str, int)):
+                raw = [raw]
+            chats: List[int] = []
+            for item in raw:
+                try:
+                    value = int(str(item).strip())
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "summary_photo_chats: مقدار نامعتبر %r حذف شد", item
+                    )
+                    continue
+                if value not in chats:
+                    chats.append(value)
+            config.SUMMARY_PHOTO_CHATS = chats
 
-        if delete_after is not None:
+        photo_chat = data.get("summary_photo_chat")
+        if "summary_photo_chat" in data:
             try:
-                config.DELETE_AFTER_SECONDS = int(delete_after)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "delete_after_seconds نامعتبر — نادیده گرفته شد.",
+                config.SUMMARY_PHOTO_CHAT = (
+                    int(photo_chat) if photo_chat not in (None, "") else None
                 )
+            except (TypeError, ValueError):
+                logger.warning("summary_photo_chat نامعتبر — نادیده گرفته شد.")
+            # سازگاری با کلید تک‌مقدار قدیمی:
+            #   • مقدار ست ⇒ اگر لیست خالی است، همان یک عضو
+            #   • مقدار None ⇒ کل فهرست پاک می‌شود (رفتار «حذف تنظیم»)
+            if config.SUMMARY_PHOTO_CHAT:
+                if not config.SUMMARY_PHOTO_CHATS:
+                    config.SUMMARY_PHOTO_CHATS = [config.SUMMARY_PHOTO_CHAT]
+            elif "summary_photo_chats" not in data:
+                config.SUMMARY_PHOTO_CHATS = []
+
+        delete_keys = {
+            "delete_after_seconds": "DELETE_AFTER_SECONDS",
+            "delete_after_seconds_posts": "DELETE_AFTER_SECONDS_POSTS",
+            "delete_after_seconds_panel": "DELETE_AFTER_SECONDS_PANEL",
+            "delete_after_seconds_summary": "DELETE_AFTER_SECONDS_SUMMARY",
+        }
+
+        for key, attribute in delete_keys.items():
+            if key not in data:
+                continue
+            value = data.get(key)
+            if value is None:
+                setattr(config, attribute, None)
+                continue
+            try:
+                setattr(config, attribute, int(value))
+            except (TypeError, ValueError):
+                logger.warning("%s نامعتبر — نادیده گرفته شد.", key)

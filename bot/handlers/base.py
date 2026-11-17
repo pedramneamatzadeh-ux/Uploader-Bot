@@ -15,6 +15,7 @@ from ..services.delivery import (
     deliver_post_for_session,
     deliver_summary_for_session,
 )
+from ..services.group_panel import deliver_group_panel
 from ..services.panels import close_panels_for
 from ..utils import track_user
 
@@ -40,6 +41,11 @@ async def start(
 
     if context.args:
         session_id = context.args[0].strip()
+
+        # R26: لینک فصل/پارت (کد با پیشوند s_) ⇒ پنل کیفیت‌ها/قسمت‌ها
+        if session_id.startswith("s_"):
+            if await deliver_group_panel(update, context, session_id):
+                return
 
         if await deliver_files_for_session(update, context, session_id):
             return

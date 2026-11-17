@@ -44,6 +44,7 @@ from .inputs import receive_channel_input
 from .inputs import receive_db_chat_input
 from .inputs import receive_db_name_input
 from .inputs import receive_duration_input
+from .inputs import receive_summary_photo_chat
 from .panel import settings_callback
 
 __all__ = [
@@ -54,5 +55,6 @@ __all__ = [
     "receive_db_chat_input",
     "receive_db_name_input",
     "receive_duration_input",
+    "receive_summary_photo_chat",
     "settings_callback",
 ]

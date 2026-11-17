@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from telegram import InlineKeyboardMarkup, Update
-from telegram.error import RetryAfter, TelegramError
+from telegram.error import BadRequest, RetryAfter, TelegramError
 from telegram.ext import ContextTypes
 
 from ..constants import Msg
@@ -20,6 +20,84 @@ from .membership import get_not_joined_channels, send_join_prompt
 
 
 logger = logging.getLogger(__name__)
+
+
+def build_final_text(upload_data: dict, sent_count: int) -> str:
+    """R28: پیامِ پایانیِ تحویل فایل — یک منبع برای لینک عادی و لینک فصل.
+
+    هر دو مسیر (لینک کیفیت قدیمی و پنل لینک فصل) باید **دقیقاً** همین
+    متن را بفرستند تا تجربهٔ کاربر یکسان باشد.
+    """
+    # B20: نسخه بلوری — کاربر هم در پیام تحویل می‌بیند
+    bluray_line = "🖨 نسخه بلوری ✅\n" if upload_data.get("is_bluray") else ""
+
+    if upload_data.get("anime_type") == "سینمایی":
+        # R19: سینمایی بدون شماره ⇒ خط شماره حذف (مثل پارت سریالی)
+        movie_num_line = (
+            f"\n🎞️ سینمایی شماره: {upload_data['season_num']}"
+            if upload_data.get("season_num")
+            else ""
+        )
+        return (
+            "✅ ارسال کامل شد!\n"
+            f"📥 {sent_count} فایل با کیفیت {upload_data['quality']} ارسال شد.\n"
+            "🏷️ نوع: سینمایی\n"
+            f"{bluray_line}"
+            f"🎬 {upload_data['anime_name']}"
+            f"{movie_num_line}"
+        )
+
+    part_line = (
+        f"📦 پارت: {upload_data['part_num']}\n"
+        if upload_data.get("part_num")
+        else ""
+    )
+    return (
+        "✅ ارسال کامل شد!\n"
+        f"📥 {sent_count} فایل با کیفیت {upload_data['quality']} ارسال شد.\n"
+        f"{bluray_line}"
+        f"🎬 {upload_data['anime_name']}\n"
+        f"🎞️ فصل: {upload_data.get('season_num') or 'نامشخص'}\n"
+        f"{part_line}"
+        f"📺 قسمت: {upload_data['episode_range']}"
+    )
+
+
+def report_keyboard(session_id: str) -> InlineKeyboardMarkup:
+    """R28: دکمهٔ «🔴 گزارش خرابی فایل‌ها» برای پیام پایانی تحویل."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                ib(
+                    "🔴 گزارش خرابی فایل‌ها",
+                    "danger",
+                    callback_data=f"report:{session_id}",
+                )
+            ]
+        ]
+    )
+
+
+def keep_report_button(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    message_id: int,
+    kind: str = "files",
+    start_at=None,
+) -> None:
+    """R28: زمان‌بندیِ *لغوپذیر* حذفِ پیامِ حامل دکمهٔ گزارش (R8e).
+
+    اگر کاربر پیش از حذف دکمه را بزند، task در base.py لغو می‌شود و پیام
+    تا پایان دریافت توضیحات می‌ماند؛ در غیر این صورت با بقیهٔ فایل‌ها
+    پاک می‌شود.
+    """
+    keep_task = schedule_delete(
+        context, chat_id, [message_id], kind=kind, start_at=start_at
+    )
+    if keep_task is not None:
+        context.chat_data.setdefault("report_del_tasks", {})[
+            message_id
+        ] = keep_task
 
 
 async def deliver_files_for_session(
@@ -128,76 +206,21 @@ async def deliver_files_for_session(
     if sent_count:
         db.record_download(session_id, user.id)
 
-        # B20: نسخه بلوری — کاربر هم در پیام تحویل می‌بیند
-        bluray_line = (
-            "🖨 نسخه بلوری ✅\n"
-            if upload_data.get("is_bluray")
-            else ""
-        )
-
-        if upload_data.get("anime_type") == "سینمایی":
-            # R19: سینمایی بدون شماره ⇒ خط شماره حذف (مثل پارت سریالی)
-            movie_num_line = (
-                f"\n🎞️ سینمایی شماره: {upload_data['season_num']}"
-                if upload_data.get("season_num")
-                else ""
-            )
-            final_text = (
-                "✅ ارسال کامل شد!\n"
-                f"📥 {sent_count} فایل با کیفیت {upload_data['quality']} ارسال شد.\n"
-                "🏷️ نوع: سینمایی\n"
-                f"{bluray_line}"
-                f"🎬 {upload_data['anime_name']}"
-                f"{movie_num_line}"
-            )
-        else:
-            part_line = (
-                f"📦 پارت: {upload_data['part_num']}\n"
-                if upload_data.get("part_num")
-                else ""
-            )
-            final_text = (
-                "✅ ارسال کامل شد!\n"
-                f"📥 {sent_count} فایل با کیفیت {upload_data['quality']} ارسال شد.\n"
-                f"{bluray_line}"
-                f"🎬 {upload_data['anime_name']}\n"
-                f"🎞️ فصل: {upload_data.get('season_num') or 'نامشخص'}\n"
-                f"{part_line}"
-                f"📺 قسمت: {upload_data['episode_range']}"
-            )
-
-        report_kb = InlineKeyboardMarkup(
-            [
-                [
-                    ib("🔴 گزارش خرابی فایل‌ها", "danger", callback_data=f"report:{session_id}")
-                ]
-            ]
-        )
+        final_text = build_final_text(upload_data, sent_count)
 
         final_msg = await message.reply_text(
             final_text,
-            reply_markup=report_kb,
+            reply_markup=report_keyboard(session_id),
         )
 
-        info_msg = await message.reply_text(deletion_notice_text())
+        info_msg = await message.reply_text(deletion_notice_text("files"))
         sent_message_ids.append(info_msg.message_id)
 
-        schedule_delete(context, chat.id, sent_message_ids)
+        schedule_delete(context, chat.id, sent_message_ids, kind="files")
 
-        # R8e: پیامِ حامل دکمه «🔴 گزارش خرابی فایل‌ها» task حذف
-        # *لغوپذیر* جداگانه می‌گیرد — اگر کاربر پیش از حذف دکمه را
-        # بزند، task در base.py لغو می‌شود و پیام تا پایان دریافت
-        # توضیحات باقی می‌ماند؛ در غیر این صورت همراه فایل‌ها حذف می‌شود.
-        keep_task = schedule_delete(
-            context,
-            chat.id,
-            [final_msg.message_id],
-        )
-        if keep_task is not None:
-            context.chat_data.setdefault(
-                "report_del_tasks",
-                {},
-            )[final_msg.message_id] = keep_task
+        # R8e/R28: پیامِ حامل دکمه «🔴 گزارش خرابی فایل‌ها» task حذف
+        # *لغوپذیر* جداگانه می‌گیرد (جزئیات در keep_report_button).
+        keep_report_button(context, chat.id, final_msg.message_id, kind="files")
 
     if failed_ids:
         # R22: با فهرست‌های بلند، پیام از سقف تلگرام رد نشود
@@ -317,14 +340,49 @@ async def deliver_post_for_session(
         )
         sent_message_ids.append(final_msg.message_id)
 
-        info_msg = await message.reply_text(deletion_notice_text())
+        info_msg = await message.reply_text(deletion_notice_text("posts"))
         sent_message_ids.append(info_msg.message_id)
 
-        schedule_delete(context, chat.id, sent_message_ids)
+        schedule_delete(context, chat.id, sent_message_ids, kind="posts")
     else:
         await message.reply_text("⚠️ هیچ پیامی از این پست ارسال نشد.")
 
     return True
+
+
+async def send_summary_photo(bot, chat_id: int, summary: dict, caption=None):
+    """R33: ارسال عکس خلاصه — اولویت با عکسِ کانال، بعد file_id قدیمی.
+
+    عکس کانالی با `copy_message` کپی می‌شود؛ پس با عوض‌شدن توکن ربات هم
+    کار می‌کند (فقط عضویت ربات در آن کانال لازم است).
+    خروجی: پیام ارسال‌شده یا None.
+    """
+    from_chat = summary.get("photo_chat_id")
+    msg_id = summary.get("photo_msg_id")
+    if str(from_chat or "").strip() != "" and msg_id:
+        try:
+            return await bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=int(from_chat),
+                message_id=int(msg_id),
+                caption=caption,
+                parse_mode="HTML" if caption else None,
+            )
+        except (BadRequest, TelegramError) as err:
+            logger.warning(
+                "کپی عکس خلاصه از کانال %s/msg=%s ناموفق بود: %s",
+                from_chat,
+                msg_id,
+                err,
+            )
+
+    file_id = summary.get("photo_file_id")
+    if file_id:
+        return await bot.send_photo(
+            chat_id=chat_id, photo=file_id, caption=caption
+        )
+
+    return None
 
 
 async def deliver_summary_for_session(
@@ -389,23 +447,56 @@ async def deliver_summary_for_session(
     if body:
         formatted += f"\n\n{body}"
 
-    photo = summary.get("photo_file_id")
     sent_message_ids: list = []
 
-    if photo:
+    # R32/R33: عکس از کانال (اولویت) یا file_id قدیمی؛ اگر ارسال نشد
+    # (آیدی خراب/دسترسی نداشتن) کل لینک نمی‌شکند و متن می‌رود.
+    has_photo = bool(
+        (str(summary.get("photo_chat_id") or "").strip() and summary.get("photo_msg_id"))
+        or summary.get("photo_file_id")
+    )
+    photo_sent = False
+    if has_photo:
         caption = formatted if len(formatted) <= 1000 else None
-        photo_msg = await message.reply_photo(photo=photo, caption=caption)
-        sent_message_ids.append(photo_msg.message_id)
-        if caption is None:
-            text_msg = await message.reply_text(formatted)
-            sent_message_ids.append(text_msg.message_id)
-    else:
+        try:
+            photo_msg = None
+            channel_photo = (
+                str(summary.get("photo_chat_id") or "").strip()
+                and summary.get("photo_msg_id")
+            )
+            if channel_photo:
+                photo_msg = await send_summary_photo(
+                    context.bot, chat.id, summary, caption
+                )
+            elif summary.get("photo_file_id"):
+                # سازگاری: file_id قدیمی ⇒ همان reply_photo قبلی
+                photo_msg = await message.reply_photo(
+                    photo=summary["photo_file_id"], caption=caption
+                )
+        except BadRequest as err:
+            logger.warning(
+                "عکس خلاصه (id=%s) ارسال نشد — فقط متن می‌رود: %s",
+                summary_id,
+                err,
+            )
+        except TelegramError as err:
+            logger.warning("ارسال عکس خلاصه ناموفق بود: %s", err)
+        else:
+            if photo_msg is not None:
+                photo_sent = True
+                sent_message_ids.append(photo_msg.message_id)
+                if caption is None:
+                    text_msg = await message.reply_text(formatted)
+                    sent_message_ids.append(text_msg.message_id)
+
+    if not photo_sent:
         text_msg = await message.reply_text(formatted)
         sent_message_ids.append(text_msg.message_id)
 
     if sent_message_ids:
-        info_msg = await message.reply_text(deletion_notice_text())
+        # R28: خلاصه داستان تایمر مستقل خودش را دارد (جدا از پست‌ها)
+        info_msg = await message.reply_text(deletion_notice_text("summary"))
         sent_message_ids.append(info_msg.message_id)
-        schedule_delete(context, chat.id, sent_message_ids)
+        schedule_delete(context, chat.id, sent_message_ids, kind="summary")
 
     return True

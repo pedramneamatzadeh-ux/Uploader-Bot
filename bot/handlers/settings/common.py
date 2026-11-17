@@ -76,8 +76,20 @@ def _panel_text() -> str:
             "",
             f"👨‍💼 ادمین‌ها: {len(admins)} نفر (به‌علاوه مالک 👑)",
             f"📢 کانال‌های اجباری: {len(channels)}",
-            f"⏱ مدت حذف پیام: "
-            f"{_human_duration(config.DELETE_AFTER_SECONDS)}",
+            f"⏱ حذف فایل‌های آپلود: "
+            f"{_human_duration(config.delete_seconds('files'))}",
+            f"⏱ حذف پست‌ها: "
+            f"{_human_duration(config.delete_seconds('posts'))}",
+            f"⏱ حذف خلاصه داستان: "
+            f"{_human_duration(config.delete_seconds('summary'))}",
+            f"⏱ حذف پنل لینک فصل: "
+            f"{_human_duration(config.delete_seconds('panel'))}",
+            "🖼️ کانال‌های عکس خلاصه: "
+            + (
+                f"{len(_photo_channels())} کانال"
+                if _photo_channels()
+                else "کانال فایل‌ها"
+            ),
             f"🗄️ دیتابیس‌های سفارشی: {len(databases)}",
             f"🧩 نسخه: {BOT_VERSION} ({BOT_VERSION_DATE})",
         ]
@@ -208,14 +220,144 @@ def _channels_text() -> str:
     return "\n".join(lines)
 
 
-def _duration_text() -> str:
-    return "\n".join(
-        [
-            "⏱ مدت حذف خودکار پیام‌ها",
-            "",
-            f"فعلی: {_human_duration(config.DELETE_AFTER_SECONDS)}",
-        ]
-    )
+# R27: سه هدف زمانی مستقل
+DURATION_KINDS = {
+    "files": "📁 فایل‌های آپلود",
+    "posts": "📝 پست‌های کانال",
+    "summary": "🧧 خلاصه داستان",
+    "panel": "📋 پنل لینک فصل (کیفیت/قسمت)",
+}
+
+# R28: کلید settings هر هدف
+DURATION_SETTING_ATTRS = {
+    "files": "DELETE_AFTER_SECONDS",
+    "posts": "DELETE_AFTER_SECONDS_POSTS",
+    "summary": "DELETE_AFTER_SECONDS_SUMMARY",
+    "panel": "DELETE_AFTER_SECONDS_PANEL",
+}
+
+
+def _duration_text(kind: str = "files") -> str:
+    value = config.delete_seconds(kind)
+    lines = [
+        "⏱ مدت حذف خودکار پیام‌ها",
+        "",
+        f"هدف: {DURATION_KINDS.get(kind, DURATION_KINDS['files'])}",
+        f"فعلی: {_human_duration(value)}",
+    ]
+
+    if kind != "files":
+        base = config.delete_seconds("files")
+        attr = DURATION_SETTING_ATTRS.get(kind, "DELETE_AFTER_SECONDS_POSTS")
+        if getattr(config, attr, None) is None:
+            lines.append(
+                f"(تنظیم نشده ⇒ از «فایل‌های آپلود» استفاده می‌شود: "
+                f"{_human_duration(base)})"
+            )
+
+    return "\n".join(lines)
+
+
+def _photo_channels() -> list:
+    """R34: لیست کانال‌های عکس خلاصه (خالی ⇒ کانال فایل‌ها)."""
+    chats = list(getattr(config, "SUMMARY_PHOTO_CHATS", None) or [])
+    if not chats and getattr(config, "SUMMARY_PHOTO_CHAT", None):
+        chats = [config.SUMMARY_PHOTO_CHAT]
+    return chats
+
+
+def _photo_channel_titles() -> dict:
+    """R34: عنوان ذخیره‌شدهٔ کانال‌های عکس (id → title)."""
+    try:
+        stored = db.get_setting("summary_photo_chat_titles", {}) or {}
+    except Exception:
+        logger.debug("خواندن عنوان کانال‌های عکس ناموفق بود", exc_info=True)
+        return {}
+    if not isinstance(stored, dict):
+        return {}
+    return {str(key): value for key, value in stored.items()}
+
+
+def _summary_photo_chat_text() -> str:
+    """R34: متن پنل «کانال‌های عکس خلاصه» (چند کانال، مثل ادمین‌ها)."""
+    chats = _photo_channels()
+    titles = _photo_channel_titles()
+    lines = ["🖼️ کانال‌های عکس خلاصه داستان", ""]
+
+    if not chats:
+        lines.append(
+            "❌ کانالی ثبت نشده ⇒ عکس‌ها از 📁 کانال فایل‌ها "
+            "(DATABASES[0]) کپی می‌شوند."
+        )
+    else:
+        for chat in chats:
+            title = titles.get(str(chat))
+            if title:
+                lines.append(f"🖼️ {title} — <code>{chat}</code>")
+            else:
+                lines.append(f"🖼️ <code>{chat}</code>")
+
+    lines += [
+        "",
+        "عکس خلاصه‌ها با «کپی از کانال» ارسال می‌شوند؛ پس حتی اگر "
+        "توکن ربات عوض شود، تا وقتی ربات عضو این کانال باشد عکس‌ها "
+        "کار می‌کنند.",
+        "🔸 آیدی عددی (مثل <code>-1001234567890</code>) یا @username "
+        "را بفرست، یا یک پیام از آن کانال را فوروارد کن. چند کانال "
+        "هم می‌توانی اضافه کنی.",
+    ]
+    return "\n".join(lines)
+
+
+def _save_photo_channels(chats: list) -> None:
+    """R34: ذخیرهٔ فهرست کانال‌های عکس خلاصه (هم settings و هم config)."""
+    clean = []
+    for chat in chats:
+        try:
+            value = int(chat)
+        except (TypeError, ValueError):
+            continue
+        if value not in clean:
+            clean.append(value)
+    config.SUMMARY_PHOTO_CHATS = clean
+    config.SUMMARY_PHOTO_CHAT = clean[0] if clean else None
+    db.set_setting("summary_photo_chats", clean)
+
+
+async def ensure_summary_photo_titles(context) -> dict:
+    """R34: عنوان کانال‌های عکس را (در صورت نبود) از تلگرام می‌گیرد."""
+    titles = dict(_photo_channel_titles())
+    changed = False
+    for chat in _photo_channels():
+        key = str(chat)
+        if titles.get(key):
+            continue
+        try:
+            info = await context.bot.get_chat(int(chat))
+        except Exception:
+            logger.debug("گرفتن عنوان کانال عکس %s ناموفق بود", key,
+                         exc_info=True)
+            continue
+        title = getattr(info, "title", None) or getattr(info, "username", None)
+        if title:
+            titles[key] = title
+            changed = True
+    if changed:
+        try:
+            db.set_setting("summary_photo_chat_titles", titles)
+        except Exception:
+            logger.debug("ذخیرهٔ عنوان کانال‌های عکس ناموفق بود",
+                         exc_info=True)
+    return titles
+
+
+def _photo_channel_label(chat) -> str:
+    """R34: برچسب کوتاه یک کانال عکس برای دکمه‌ها/متن‌ها."""
+    title = _photo_channel_titles().get(str(chat))
+    if title:
+        return title
+    text = str(chat)
+    return f"کانال {text}" if not text.lstrip("-").isdigit() else text
 
 
 def _dbs_text() -> str:

@@ -2,6 +2,7 @@ import logging
 
 from bot.application import build_application
 from bot.config import config
+from bot.constants import BOT_VERSION, BOT_VERSION_DATE
 from bot.database import db
 
 
@@ -30,6 +31,18 @@ def preflight() -> bool:
         return False
 
     db.init()
+
+    # R26: لینک پایدار برای فصل/پارت‌های موجود (یک‌بار، idempotent)
+    try:
+        created = db.backfill_group_links()
+        logger.info(
+            "لینک فصل/پارت: %s کد تازه ساخته شد (مجموع %s).",
+            created,
+            db.count_group_links(),
+        )
+    except Exception as err:      # noqa: BLE001 — استارت نباید بشکند
+        logger.warning("ساخت لینک فصل‌ها ناموفق بود: %s", err)
+
     return _post_init_checks()
 
 
@@ -82,7 +95,11 @@ def main() -> None:
         )
 
     application = build_application()
-    logger.info("ربات در حال اجراست...")
+    logger.info(
+        "ربات نسخهٔ %s (%s) در حال اجراست...",
+        BOT_VERSION,
+        BOT_VERSION_DATE,
+    )
     application.run_polling(drop_pending_updates=True)
 
 

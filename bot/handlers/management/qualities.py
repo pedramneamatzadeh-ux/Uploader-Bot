@@ -45,6 +45,7 @@ from ...utils import (
 )
 
 from .common import QUALITY_ORDER, _append_name_buttons, _group_label, _manage
+from .episodes import _share_link_rows
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,13 @@ async def show_quality_list(
 
     # R23: ترتیب دکمه‌های صفحهٔ کیفیت‌های سینمایی (درخواست کاربر):
     # اسم ظاهری/واقعی ← افزودن کیفیت جدید ← خلاصه داستان ← بلوری ← اسم‌ها
+    # R30: لینک فقط در صفحهٔ «کیفیت‌های یک سینمایی» (که خودش یک گروه
+    # کامل است). در صفحهٔ کیفیت‌های یک **قسمت** از یک فصل، دکمهٔ لینک
+    # معنا ندارد و نمایش داده نمی‌شود.
+    if is_cinema and not episode:
+        share_rows, _share_active = await _share_link_rows(context, manage)
+        keyboard.extend(share_rows)
+
     if is_cinema:
         _append_name_buttons(keyboard, manage)
 

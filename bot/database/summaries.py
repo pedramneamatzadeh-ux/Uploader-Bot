@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 _SELECT_COLS = """
     id, anime_name, season_num, part_num, summary_text,
-    photo_file_id, created_by, created_at, updated_at
+    photo_file_id, photo_chat_id, photo_msg_id,
+    created_by, created_at, updated_at
 """
 
 
@@ -71,6 +72,8 @@ class SummariesMixin:
         photo_file_id: Optional[str] = None,
         created_by: Optional[int] = None,
         part_num: str = "",
+        photo_chat_id: Optional[Any] = None,
+        photo_msg_id: Optional[int] = None,
     ) -> None:
         """ثبت/به‌روزرسانی خلاصه (upsert روی نام+فصل+پارت).
 
@@ -83,12 +86,15 @@ class SummariesMixin:
                 """
                 INSERT INTO season_summaries (
                     anime_name, season_num, part_num, summary_text,
-                    photo_file_id, created_by, updated_at
+                    photo_file_id, photo_chat_id, photo_msg_id,
+                    created_by, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(anime_name, season_num, part_num) DO UPDATE SET
                     summary_text = excluded.summary_text,
                     photo_file_id = excluded.photo_file_id,
+                    photo_chat_id = excluded.photo_chat_id,
+                    photo_msg_id = excluded.photo_msg_id,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -97,7 +103,39 @@ class SummariesMixin:
                     part_num or "",
                     summary_text,
                     photo_file_id,
+                    photo_chat_id,
+                    photo_msg_id,
                     created_by,
+                ),
+            )
+
+    def set_summary_photo(
+        self,
+        summary_id: int,
+        photo_chat_id: Any = None,
+        photo_msg_id: Optional[int] = None,
+        photo_file_id: Optional[str] = None,
+    ) -> None:
+        """R33: جایگزینی/حذف عکس یک خلاصه بدون تغییر متن.
+
+        عکسِ کانالی (chat_id + msg_id) اولویت دارد؛ اگر نبود، همان
+        `photo_file_id` قدیمی ذخیره می‌شود (سازگاری).
+        """
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE season_summaries SET
+                    photo_chat_id = ?,
+                    photo_msg_id = ?,
+                    photo_file_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    photo_chat_id,
+                    photo_msg_id,
+                    photo_file_id,
+                    int(summary_id),
                 ),
             )
 

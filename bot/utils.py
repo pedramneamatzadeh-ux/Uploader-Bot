@@ -547,10 +547,36 @@ async def _delete_messages_after_delay(
     chat_id: int,
     message_ids: List[int],
     delay: int,
+    kind: str = "files",
+    start_at: Optional[float] = None,
 ) -> None:
-    await asyncio.sleep(max(0, delay))
+    """R29: در لحظهٔ حذف، زمانِ *فعلیِ* همان نوع دوباره خوانده می‌شود.
 
-    for msg_id in dict.fromkeys(message_ids):
+    قبلاً مقدار در لحظهٔ زمان‌بندی قفل می‌شد؛ پس تغییر تنظیمات روی
+    پیام‌های در انتظار اثری نداشت (مثلاً خاموش‌کردن حذف). حالا اگر
+    مقدار جدید کوچک‌تر/بزرگ‌تر شد، همان لحظه اعمال می‌شود (بدون
+    کشیدن دوبارهٔ تأخیر برای جلوگیری از حلقه).
+    """
+    # R30: برای فایل‌ها، مبدأ شمارش **پایان ارسال** است نه شروع آن
+    # (قبلاً با بازه‌های بلند، فایل‌های اول پیش از رسیدن پیام هشدار پاک
+    # می‌شدند و کاربر پیام «۳۰ ثانیه» را بعد از حذف فایل‌ها می‌دید).
+    wait = max(0, delay)
+    if start_at is not None:
+        wait = max(0, start_at + delay - asyncio.get_running_loop().time())
+    await asyncio.sleep(wait)
+
+    current = config.delete_seconds(kind)
+    if not current:
+        logger.info(
+            "حذف خودکار «%s» خاموش شد — حذف انجام نشد.", kind
+        )
+        return
+
+    seen = set()
+    for msg_id in message_ids:
+        if msg_id in seen:
+            continue
+        seen.add(msg_id)
         try:
             await bot.delete_message(
                 chat_id=chat_id,
@@ -569,14 +595,27 @@ def schedule_delete(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     message_ids: List[int],
+    kind: str = "files",
+    start_at: Optional[float] = None,
 ) -> Optional[Any]:
-    """حذف پیام‌ها با تأخیر؛ task برگردانده می‌شود تا قابل لغو باشد (R8e)."""
+    """حذف پیام‌ها با تأخیر؛ task برگردانده می‌شود تا قابل لغو باشد (R8e).
+
+    R27/R28: `kind` نوع زمان را انتخاب می‌کند — «files» (آپلود)،
+    «posts» (پست‌های کانال)، «summary» (خلاصه داستان) و «panel» (پنل
+    لینک فصل). زمان اختصاصی اگر تنظیم نشده باشد از زمان فایل‌ها ارث
+    می‌برد.
+
+    R30: `start_at` (زمان `loop.time()`) مبدأ شمارش را جابه‌جا می‌کند تا
+    شمارش از **پایان ارسال** شروع شود، نه از شروع آن.
+    """
     if not message_ids:
         return None
 
+    delay_seconds = config.delete_seconds(kind)
+
     # R24: اگر مدت حذف هیچ‌جا تنظیم نشده/صفر باشد، حذف خودکار خاموش است
     # (قبلاً None به asyncio.sleep می‌رفت و TypeError می‌داد).
-    if not config.DELETE_AFTER_SECONDS:
+    if not delay_seconds:
         logger.info(
             "حذف خودکار پیام‌ها غیرفعال است (DELETE_AFTER_SECONDS تنظیم نشده).",
         )
@@ -587,14 +626,16 @@ def schedule_delete(
             bot=context.bot,
             chat_id=chat_id,
             message_ids=message_ids,
-            delay=config.DELETE_AFTER_SECONDS,
+            delay=delay_seconds,
+            kind=kind,
+            start_at=start_at,
         ),
     )
 
 
-def deletion_notice_text() -> str:
-    """R24: متن اطلاع‌رسانی حذف خودکار — وقتی مدت تنظیم نشده، دروغ نگو."""
-    seconds = config.DELETE_AFTER_SECONDS
+def deletion_notice_text(kind: str = "files") -> str:
+    """R24/R27: متن اطلاع‌رسانی حذف خودکار (files/posts/summary/panel)."""
+    seconds = config.delete_seconds(kind)
     if not seconds:
         return (
             "🗑️ حذف خودکار پیام‌ها غیرفعال است "
@@ -659,6 +700,15 @@ async def build_download_link(
 ) -> str:
     username = await get_bot_username(context)
     return f"https://t.me/{username}?start={session_id}"
+
+
+async def build_group_link(
+    context: ContextTypes.DEFAULT_TYPE,
+    share_code: str,
+) -> str:
+    """R26: لینک پایدار یک فصل/پارت (`?start=s_<code>`)."""
+    username = await get_bot_username(context)
+    return f"https://t.me/{username}?start={share_code}"
 
 
 # کلید فهرست پیام‌های پنل‌های باز در chat_data (R15: بستن واقعی پنل قبلی).

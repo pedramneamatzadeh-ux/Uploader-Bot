@@ -49,7 +49,11 @@ from .dispatch import handle_management_callback
 from .extras import handle_extra_text
 from .inputs import handle_search_input
 from .inputs import start_management
-from .summary import handle_summary_photo, handle_summary_text
+from .summary import (
+    handle_summary_photo,
+    handle_summary_photo_id,
+    handle_summary_text,
+)
 
 __all__ = [
     "cancel_management",
@@ -58,6 +62,7 @@ __all__ = [
     "handle_management_callback",
     "handle_search_input",
     "handle_summary_photo",
+    "handle_summary_photo_id",
     "handle_summary_text",
     "start_management",
 ]

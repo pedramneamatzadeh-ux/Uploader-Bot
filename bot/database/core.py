@@ -175,6 +175,8 @@ class CoreMixin:
                     part_num TEXT NOT NULL DEFAULT '',
                     summary_text TEXT NOT NULL DEFAULT '',
                     photo_file_id TEXT,
+                    photo_chat_id TEXT,
+                    photo_msg_id INTEGER,
                     created_by INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -195,6 +197,23 @@ class CoreMixin:
 
                 CREATE INDEX IF NOT EXISTS idx_post_messages_post
                     ON post_messages(post_id);
+
+                -- R26: لینک پایدار هر فصل/پارت/سینمایی/OVA (پنل کاربر)
+                CREATE TABLE IF NOT EXISTS group_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    anime_name TEXT NOT NULL,
+                    season_num TEXT NOT NULL DEFAULT '',
+                    part_num TEXT NOT NULL DEFAULT '',
+                    anime_type TEXT NOT NULL DEFAULT '',
+                    share_code TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (anime_name, season_num, part_num, anime_type)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_group_links_code
+                    ON group_links(share_code);
 
                 """
             )
@@ -233,6 +252,15 @@ class CoreMixin:
                 (
                     "ALTER TABLE uploads "
                     "ADD COLUMN is_bluray INTEGER DEFAULT 0"
+                ),
+                # R33: عکس خلاصه از کانال (جایگزین پایدار file_id)
+                (
+                    "ALTER TABLE season_summaries "
+                    "ADD COLUMN photo_chat_id TEXT"
+                ),
+                (
+                    "ALTER TABLE season_summaries "
+                    "ADD COLUMN photo_msg_id INTEGER"
                 ),
             )
 

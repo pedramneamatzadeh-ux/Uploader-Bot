@@ -18,6 +18,7 @@ from ...constants import (
     MANAGE_LIST,
     MANAGE_QUALITIES,
     MANAGE_SEARCH,
+    OTHER_SEASONS,
     UPLOAD_FIELD_MAP,
     Msg,
 )
@@ -50,6 +51,66 @@ logger = logging.getLogger(__name__)
 
 # B10: تعداد قسمت‌ها در هر صفحه (انیمه‌های پرقسمت در یک پیام جا نمی‌شوند)
 EPISODES_PAGE_SIZE = 20
+
+
+def share_link_label(group_type: str) -> str:
+    """R28: برچسب دکمهٔ لینک در مدیریت — متناسب با نوع گروه.
+
+    سینمایی ⇒ «لینک این سینمایی»؛ فصل‌های «سایر» (OVA/ONA/Special) ⇒
+    «لینک این OVA» و …؛ بقیه ⇒ «لینک این فصل».
+    """
+    kind = (group_type or "").strip()
+    if kind == "سینمایی":
+        return "لینک این سینمایی"
+    if kind.lower() in {s.lower() for s in OTHER_SEASONS}:
+        return f"لینک این {kind}"
+    return "لینک این فصل"
+
+
+async def _share_link_rows(
+    context: ContextTypes.DEFAULT_TYPE,
+    manage: dict,
+) -> list:
+    """R26e: دکمه‌های «لینک این فصل» + تاگل فعال/غیرفعال.
+
+    فقط در صفحه‌هایی صدا زده می‌شود که به **یک** فصل/پارت/سینمایی محدودند
+    (فهرست قسمت‌ها و کیفیت‌ها). در صفحهٔ «فهرست فصل‌ها» عمداً نمایش داده
+    نمی‌شود، چون لینک آن‌جا معنای «همهٔ فصل‌ها» می‌گرفت (باگ گزارش‌شده).
+    """
+    try:
+        group_type = (
+            manage.get("group_type")
+            or manage.get("anime_type")
+            or ("سینمایی" if manage.get("is_cinema") else "سریالی")
+        )
+        info = db.get_or_create_group_link(
+            manage.get("name") or "",
+            manage.get("season") or "",
+            manage.get("part") or "",
+            group_type,
+        )
+    except Exception as err:      # noqa: BLE001 — لینک نباید صفحه را بشکند
+        logger.warning("ساخت لینک فصل ناموفق بود: %s", err)
+        return [], False
+
+    manage["share_code"] = info["share_code"]
+    manage["share_status"] = info["status"]
+    context.user_data["manage"] = manage
+
+    active = (info["status"] or "active") == "active"
+    # R27: یک دکمهٔ ادغام‌شده — با زدنش هم لینک و هم دکمهٔ
+    # فعال/غیرفعال در همان پیام نمایش داده می‌شود (درخواست کاربر).
+    # R28: برچسب بر اساس نوع گروه («لینک این سینمایی» / «لینک این OVA» / …)
+    # و رنگ سبز (درخواست کاربر).
+    return [
+        [
+            ib(
+                f"🔗 {share_link_label(group_type)}",
+                callback_data="mg_group_link",
+                style="success",
+            )
+        ]
+    ], active
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +185,11 @@ async def show_episode_list(
             lines.append(f"\n📄 صفحه {page + 1} از {pages}")
 
         text = title + "\n".join(lines)
+
+    # R30: دکمهٔ لینک در صفحهٔ یک فصل ⇒ **زیر قسمت‌ها** و بالای
+    # «تغییر اسم واقعی/ظاهری» (درخواست کاربر؛ قبلاً اشتباهاً بالای همه بود)
+    share_rows, _share_active = await _share_link_rows(context, manage)
+    keyboard.extend(share_rows)
 
     _append_name_buttons(keyboard, manage)
 

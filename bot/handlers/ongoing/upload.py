@@ -43,6 +43,7 @@ from ...keyboards import (
 from ...utils import (
     register_panel_message,
     build_download_link,
+    build_group_link,
     fmt_tehran,
     get_default_channel_chat_id,
     go_to_ongoing_list,
@@ -636,6 +637,24 @@ async def confirm_ongoing_upload(
 
     admin_id = query.from_user.id
     links_text = ""
+
+    # R26: لینک پایدار همین فصل/پارت
+    group_link_text = ""
+    try:
+        group_link = db.get_or_create_group_link(
+            upload["anime_name"],
+            upload.get("season_num"),
+            upload.get("part_num"),
+            "سریالی",
+        )
+        group_url = await build_group_link(
+            context, group_link["share_code"]
+        )
+        group_link_text = (
+            f"{Msg.GROUP_LINK_TITLE}\n<code>{group_url}</code>\n\n"
+        )
+    except sqlite3.Error as err:
+        logger.warning("ساخت لینک فصل ناموفق بود: %s", err)
     channel_chat_id = upload.get("channel_chat_id")
     if channel_chat_id is None:
         channel_chat_id = get_default_channel_chat_id()
@@ -695,6 +714,7 @@ async def confirm_ongoing_upload(
             "✅ قسمت جدید با موفقیت ثبت شد!\n\n"
             f"🎬 {anime_name}\n"
             f"📺 قسمت: {episode_range}\n\n"
+            f"{group_link_text}"
             f"{links_text}"
         ),
         parse_mode="HTML",

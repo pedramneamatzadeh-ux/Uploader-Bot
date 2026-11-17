@@ -247,6 +247,30 @@ class GroupsMixin:
                     """,
                     (new_name, old_name),
                 ).rowcount
+                # R26c: انتقال ردیف‌های لینک فصل به نام جدید.
+                # اگر مقصد همین فصل/پارت را از قبل دارد، ردیف مبدأ حذف
+                # می‌شود (کد مقصد پایدار می‌ماند و UNIQUE نمی‌شکند).
+                connection.execute(
+                    """
+                    DELETE FROM group_links
+                    WHERE anime_name = ?
+                      AND EXISTS (
+                          SELECT 1 FROM group_links AS dest
+                          WHERE dest.anime_name = ?
+                            AND dest.season_num = group_links.season_num
+                            AND dest.part_num = group_links.part_num
+                            AND dest.anime_type = group_links.anime_type
+                      )
+                    """,
+                    (old_name, new_name),
+                )
+                connection.execute(
+                    "UPDATE group_links SET anime_name = ?, "
+                    "updated_at = CURRENT_TIMESTAMP "
+                    "WHERE anime_name = ?",
+                    (new_name, old_name),
+                )
+
                 # R10: انتقال خلاصه داستان فصل‌ها (در ادغام، مقصد برنده است)
                 connection.execute(
                     """

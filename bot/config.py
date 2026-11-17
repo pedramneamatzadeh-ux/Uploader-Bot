@@ -40,9 +40,39 @@ class Config:
 
         # None ⇒ در db.init() از دیتابیس پر می‌شود؛ اگر هیچ‌جا نبود
         # main() خطای زیبا گزارش می‌کند (به‌جای traceback در import — P6)
+        # R27: پایهٔ «فایل‌های آپلود»؛ پست و پنل از همین مقدار ارث می‌برند
+        # تا رفتار قبلی دست‌نخورده بماند.
         self.DELETE_AFTER_SECONDS: Optional[int] = self._parse_optional_int(
             os.getenv("DELETE_AFTER_SECONDS")
         )
+
+        # R27: سه زمان حذف مستقل (None = ارث‌بری از پایه/غیرفعال)
+        self.DELETE_AFTER_SECONDS_POSTS: Optional[int] = (
+            self._parse_optional_int(os.getenv("DELETE_AFTER_SECONDS_POSTS"))
+        )
+        self.DELETE_AFTER_SECONDS_PANEL: Optional[int] = (
+            self._parse_optional_int(os.getenv("DELETE_AFTER_SECONDS_PANEL"))
+        )
+        # R28: خلاصه داستان زمان حذف مستقل خودش را دارد (جدا از پست‌ها)
+        self.DELETE_AFTER_SECONDS_SUMMARY: Optional[int] = (
+            self._parse_optional_int(os.getenv("DELETE_AFTER_SECONDS_SUMMARY"))
+        )
+
+        # R33/R34: کانال‌های نگهداری عکس خلاصه‌ها.
+        # اولویت: لیست SUMMARY_PHOTO_CHATS، بعد تک‌مقدار قدیمی، بعد
+        # کانال فایل‌ها (DATABASES[0]).
+        self.SUMMARY_PHOTO_CHAT: Optional[int] = self._parse_optional_int(
+            os.getenv("SUMMARY_PHOTO_CHAT")
+        )
+        raw_photo_chats = (os.getenv("SUMMARY_PHOTO_CHATS") or "").split(",")
+        self.SUMMARY_PHOTO_CHATS: List[int] = [
+            value
+            for value in (
+                self._parse_optional_int(part.strip())
+                for part in raw_photo_chats
+            )
+            if value is not None
+        ]
 
         self.REQUIRED_CHANNELS: List[Union[int, str]] = (
             self._parse_required_channels(
@@ -147,6 +177,24 @@ class Config:
                 result.append(channel)
 
         return result
+
+    def delete_seconds(self, kind: str = "files") -> Optional[int]:
+        """R27/R28: زمان حذف مؤثر برای «files»/«posts»/«summary»/«panel».
+
+        اگر زمان اختصاصی تنظیم نشده باشد، از زمان فایل‌ها ارث می‌برد
+        (سازگاری کامل با تنظیم قبلی)؛ صفر = حذف خودکار خاموش.
+        """
+        base = self.DELETE_AFTER_SECONDS
+        if kind == "posts":
+            value = self.DELETE_AFTER_SECONDS_POSTS
+        elif kind == "panel":
+            value = self.DELETE_AFTER_SECONDS_PANEL
+        elif kind == "summary":
+            value = self.DELETE_AFTER_SECONDS_SUMMARY
+        else:
+            value = base
+
+        return base if value is None else value
 
     def validate(self) -> None:
         # R24 (P12): آیدی‌های نامعتبر ADMIN_IDS بی‌صدا نادیده گرفته نشوند

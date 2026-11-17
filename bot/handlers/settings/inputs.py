@@ -16,6 +16,7 @@ from ...constants import (
     SETTINGS_DB_NAME,
     SETTINGS_DURATION,
     SETTINGS_PANEL,
+    SETTINGS_SUMMARY_PHOTO_CHAT,
     Msg,
 )
 from ...database import db
@@ -29,6 +30,7 @@ from ...keyboards import (
     settings_duration_keyboard,
     settings_input_keyboard,
     settings_panel_keyboard,
+    settings_summary_photo_keyboard,
 )
 from ...utils import go_to_main_menu, normalize_digits
 
@@ -39,6 +41,10 @@ from .common import (
     _channel_titles,
     _channels_text,
     _dbs_text,
+    _photo_channel_titles,
+    _photo_channels,
+    _save_photo_channels,
+    _summary_photo_chat_text,
     _duration_text,
     _edit_by_id,
     _forwarded_user_id,
@@ -198,15 +204,24 @@ async def receive_duration_input(
         )
         return SETTINGS_DURATION
 
-    db.set_setting("delete_after_seconds", value)
+    # R29: ذخیره برای هدف انتخاب‌شده — با همان نگاشتِ panel.py
+    # (قبلاً «خلاصه» نداشت و هر مقدار دلخواهِ خلاصه، روی زمان فایل‌ها
+    # می‌نشست: باگ گزارش‌شده).
+    from .panel import DURATION_SETTING_KEYS
 
-    full = f"{Msg.DURATION_SET}\n\n{_duration_text()}"
+    kind = context.user_data.pop("st_duration_kind", "files")
+    if kind not in DURATION_SETTING_KEYS:
+        kind = "files"
+
+    db.set_setting(DURATION_SETTING_KEYS[kind], value)
+
+    full = f"{Msg.DURATION_SET}\n\n{_duration_text(kind)}"
     await _edit_by_id(
         context,
         context.user_data.get("st_chat"),
         context.user_data.get("st_msg"),
         full,
-        settings_duration_keyboard(),
+        settings_duration_keyboard(kind),
     )
     return SETTINGS_PANEL
 
@@ -248,6 +263,55 @@ async def receive_db_name_input(
 
 
 @owner_only
+@owner_only
+async def receive_summary_photo_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """R33: دریافت کانال نگهداری عکس خلاصه‌ها (آیدی/@username/فوروارد)."""
+    cancel_state = await _handle_text_cancel(update, context)
+    if cancel_state is not None:
+        return cancel_state
+
+    prompt = Msg.ADD_SUMMARY_PHOTO_CHAT_PROMPT
+    target = _resolve_chat_target(update.message)
+    if target is None:
+        await _retry_input(update, context, Msg.DB_CHAT_INVALID, prompt)
+        return SETTINGS_SUMMARY_PHOTO_CHAT
+
+    chat_id, error = await _precheck_chat(context, target)
+    if error is not None:
+        await _retry_input(update, context, error, prompt)
+        return SETTINGS_SUMMARY_PHOTO_CHAT
+
+    chats = list(_photo_channels())
+    if int(chat_id) in chats:
+        await _retry_input(
+            update, context, "⚠️ این کانال قبلاً اضافه شده است.", prompt
+        )
+        return SETTINGS_SUMMARY_PHOTO_CHAT
+
+    chats.append(int(chat_id))
+    _save_photo_channels(chats)
+
+    # عنوان کانال را همان‌جا ذخیره می‌کنیم تا پنل مثل «ادمین‌ها» دو ستونه شود
+    try:
+        info = await context.bot.get_chat(int(chat_id))
+        title = getattr(info, "title", None) or getattr(info, "username", None)
+    except Exception:
+        title = None
+    if title:
+        titles = dict(_photo_channel_titles())
+        titles[str(chat_id)] = title
+        db.set_setting("summary_photo_chat_titles", titles)
+
+    await _edit_by_id(
+        context,
+        context.user_data.get("st_chat"),
+        context.user_data.get("st_msg"),
+        f"✅ کانال عکس خلاصه اضافه شد:\n\n{_summary_photo_chat_text()}",
+        settings_summary_photo_keyboard(_photo_channels(), _photo_channel_titles()),
+    )
+    return SETTINGS_PANEL
+
+
 async def receive_db_chat_input(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

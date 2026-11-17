@@ -42,6 +42,7 @@ from ...keyboards import (
 )
 from ...utils import (
     build_download_link,
+    build_group_link,
     get_default_channel_chat_id,
     go_to_main_menu,
     register_panel_message,
@@ -209,6 +210,33 @@ async def confirm_upload(
     if channel_chat_id is None:
         channel_chat_id = get_default_channel_chat_id()
 
+    # R26: لینک پایدار همین فصل/پارت (اول نشان داده می‌شود)
+    group_link_text = ""
+    try:
+        # R26-fix: نوع از همان ردیف‌هایی که ذخیره شد گرفته می‌شود
+        saved_types = {
+            (item.get("anime_type") or "") for item in qualities
+        } or {(base.get("anime_type") or "")}
+        group_type = (
+            saved_types.pop()
+            if len(saved_types) == 1
+            else (base.get("anime_type") or "")
+        )
+        group_link = db.get_or_create_group_link(
+            base["anime_name"],
+            base.get("season_num"),
+            base.get("part_num"),
+            group_type,
+        )
+        group_url = await build_group_link(
+            context, group_link["share_code"]
+        )
+        group_link_text = (
+            f"{Msg.GROUP_LINK_TITLE}\n<code>{group_url}</code>\n\n"
+        )
+    except sqlite3.Error as err:
+        logger.warning("ساخت لینک فصل ناموفق بود: %s", err)
+
     links_text = ""
     for item in qualities:
         session_id = str(uuid.uuid4())
@@ -255,7 +283,9 @@ async def confirm_upload(
     ]
 
     await query.edit_message_text(
-        "✅ آپلود با موفقیت ثبت شد!\n\n" + links_text,
+        "✅ آپلود با موفقیت ثبت شد!\n\n"
+        + group_link_text
+        + links_text,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML",
     )

@@ -36,6 +36,7 @@ from ...keyboards import (
 )
 from ...utils import (
     build_download_link,
+    build_group_link,
     fmt_tehran,
     get_database_name,
     go_to_main_menu,
@@ -330,6 +331,81 @@ async def _dispatch_management(
         context.user_data["manage"] = manage
         await show_episode_list(chat_id, context)
         return MANAGE_EPISODES
+
+    # --- R26: لینک پایدار فصل/پارت ---
+    if data == "mg_group_link":
+        share_code = manage.get("share_code")
+        if not share_code:
+            await query.answer("❌ لینک این فصل ساخته نشد.", show_alert=True)
+            return MANAGE_GROUPS
+        url = await build_group_link(context, share_code)
+        active = (manage.get("share_status") or "active") == "active"
+        # R27: متن «کپی شد» حذف شد — خودِ لینک نمایش داده می‌شود و
+        # دکمهٔ فعال/غیرفعال هم داخل همین پیام است.
+        await query.answer()
+        await query.edit_message_text(
+            f"{Msg.GROUP_LINK_TITLE}\n<code>{url}</code>\n\n"
+            "این لینک برای همهٔ کیفیت‌ها و قسمت‌های این "
+            "فصل/پارت است.\n"
+            "برای کپی، روی لینک ضربه بزن.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        ib(
+                            Msg.GROUP_LINK_TOGGLE_OFF
+                            if active
+                            else Msg.GROUP_LINK_TOGGLE_ON,
+                            callback_data="mg_group_link_toggle",
+                        )
+                    ],
+                    [
+                        ib("◀️ بازگشت", callback_data="mg_back"),
+                    ],
+                ]
+            ),
+        )
+        return MANAGE_EPISODES if manage.get("level") == 3 else MANAGE_GROUPS
+
+    if data == "mg_group_link_toggle":
+        share_code = manage.get("share_code")
+        if not share_code:
+            await query.answer("❌ لینک این فصل ساخته نشد.", show_alert=True)
+            return MANAGE_GROUPS
+        active = (manage.get("share_status") or "active") == "active"
+        db.set_group_link_status(share_code, not active)
+        manage["share_status"] = "inactive" if active else "active"
+        context.user_data["manage"] = manage
+        await query.answer(
+            "🚧 لینک فصل غیرفعال شد."
+            if active
+            else "✅ لینک فصل فعال شد."
+        )
+        url = await build_group_link(context, share_code)
+        now_active = not active
+        manage["share_status"] = "active" if now_active else "inactive"
+        context.user_data["manage"] = manage
+        await query.edit_message_text(
+            f"{Msg.GROUP_LINK_TITLE}\n<code>{url}</code>\n\n"
+            "این لینک برای همهٔ کیفیت‌ها و قسمت‌های این "
+            "فصل/پارت است.\n"
+            + ("وضعیت: ✅ فعال" if now_active else "وضعیت: 🚧 غیرفعال"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        ib(
+                            Msg.GROUP_LINK_TOGGLE_OFF
+                            if now_active
+                            else Msg.GROUP_LINK_TOGGLE_ON,
+                            callback_data="mg_group_link_toggle",
+                        )
+                    ],
+                    [ib("◀️ بازگشت", callback_data="mg_back")],
+                ]
+            ),
+        )
+        return MANAGE_EPISODES if manage.get("level") == 3 else MANAGE_GROUPS
 
     # --- بازگشت یک سطح بالاتر ---
     if data == "mg_back":

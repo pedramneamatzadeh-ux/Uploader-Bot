@@ -64,6 +64,7 @@ async def show_group_list(
     for key in ("season", "part", "episode", "l3", "l4"):
         manage.pop(key, None)
 
+
     # عنوان از محتوای گروه‌ها ساخته می‌شود (نام مخلوط: هم فصل هم فیلم)
     has_series = any(not group.get("is_cinema") for group in groups)
     has_movie = any(group.get("is_cinema") for group in groups)

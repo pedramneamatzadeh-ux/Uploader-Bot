@@ -22,6 +22,8 @@ from .constants import (
     CUSTOM_AIRING,
     DB_SELECT,
     EPISODE_RANGE,
+    GROUP_PANEL_EPISODES,
+    GROUP_PANEL_QUALITIES,
     MANAGE_DETAIL,
     MANAGE_EDIT,
     MANAGE_EPISODES,
@@ -32,6 +34,7 @@ from .constants import (
     MANAGE_SEARCH,
     MANAGE_STATS,
     MANAGE_SUMMARY_PHOTO,
+    MANAGE_SUMMARY_PHOTO_ID,
     MANAGE_SUMMARY_TEXT,
     MOVIE_NUM,
     MULTI_QUALITY,
@@ -62,6 +65,7 @@ from .constants import (
     SETTINGS_ADMIN,
     SETTINGS_CHANNEL,
     SETTINGS_DB_CHAT,
+    SETTINGS_SUMMARY_PHOTO_CHAT,
     SETTINGS_DB_NAME,
     SETTINGS_DURATION,
     SETTINGS_PANEL,
@@ -91,6 +95,7 @@ from .handlers.management import (
     handle_management_callback,
     handle_search_input,
     handle_summary_photo,
+    handle_summary_photo_id,
     handle_summary_text,
     start_management,
 )
@@ -155,9 +160,11 @@ from .handlers.settings import (
     receive_channel_input,
     receive_db_chat_input,
     receive_db_name_input,
+    receive_summary_photo_chat,
     receive_duration_input,
     settings_callback,
 )
+from .services.group_panel import handle_group_panel_callback
 from .services.panels import (
     PANEL_BUTTONS_PATTERN,
     panel_gate,
@@ -452,6 +459,13 @@ def _build_management_conversation() -> ConversationHandler:
                                handle_summary_text),
                 CallbackQueryHandler(handle_management_callback),
             ],
+            MANAGE_SUMMARY_PHOTO_ID: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_summary_photo_id,
+                ),
+                CallbackQueryHandler(handle_management_callback),
+            ],
             MANAGE_SUMMARY_PHOTO: [
                 MessageHandler(filters.PHOTO, handle_summary_photo),
                 MessageHandler(filters.TEXT & ~filters.COMMAND,
@@ -622,6 +636,14 @@ def _build_settings_conversation() -> ConversationHandler:
                 ),
                 _st_callback(),
             ],
+            # R33: کانال نگهداری عکس خلاصه‌ها
+            SETTINGS_SUMMARY_PHOTO_CHAT: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    receive_summary_photo_chat,
+                ),
+                _st_callback(),
+            ],
         },
         fallbacks=[
             MessageHandler(
@@ -689,6 +711,36 @@ async def _global_error_handler(
             logger.warning("ارسال اطلاع خطا به مالک ممکن نشد")
 
 
+def _build_group_panel_conversation() -> ConversationHandler:
+    """R26: پنل کاربرِ لینک فصل (کیفیت‌ها ⇄ قسمت‌ها).
+
+    بدون fallback: `?start` بعدی به‌طور طبیعی مکالمه را جای‌گزین می‌کند و
+    دکمه‌های بی‌صاحب به `stale_callback_answer` می‌رسند.
+    """
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(
+                handle_group_panel_callback, pattern=r"^gp_"
+            )
+        ],
+        states={
+            GROUP_PANEL_QUALITIES: [
+                CallbackQueryHandler(
+                    handle_group_panel_callback, pattern=r"^gp_"
+                )
+            ],
+            GROUP_PANEL_EPISODES: [
+                CallbackQueryHandler(
+                    handle_group_panel_callback, pattern=r"^gp_"
+                )
+            ],
+        },
+        fallbacks=[],
+        allow_reentry=True,
+        per_chat=False,
+    )
+
+
 def build_application() -> Application:
     application = Application.builder().token(config.BOT_TOKEN).build()
 
@@ -724,6 +776,7 @@ def build_application() -> Application:
     application.add_handler(broadcast_conv)
     application.add_handler(post_conv)
     application.add_handler(settings_conv)
+    application.add_handler(_build_group_panel_conversation())
 
     application.add_handler(
         MessageHandler(filters.Regex("^💾 بک‌آپ$"), handle_backup)

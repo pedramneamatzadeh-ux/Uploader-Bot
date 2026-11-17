@@ -173,6 +173,46 @@ POST_CANCEL_MENU = ReplyKeyboardMarkup(
 # ============================================================================
 
 
+def settings_summary_photo_keyboard(chats=None, titles=None) -> InlineKeyboardMarkup:
+    """R34: پنل «کانال‌های عکس خلاصه» — دقیقاً مثل ادمین‌ها.
+
+    هر کانال یک ردیف دو ستونه: چپ آیدی عددی، راست عنوان کانال؛ هر دو
+    دکمه به تأیید حذف همان کانال می‌رسند. بعد «➕ افزودن کانال».
+    """
+    if chats is None:
+        chats = list(getattr(config, "SUMMARY_PHOTO_CHATS", None) or [])
+        if not chats and getattr(config, "SUMMARY_PHOTO_CHAT", None):
+            chats = [config.SUMMARY_PHOTO_CHAT]
+    titles = titles or {}
+
+    rows = []
+    for idx, chat in enumerate(chats):
+        label = str(chat)
+        name = titles.get(label) or titles.get(str(chat)) or "—"
+        rows.append(
+            [
+                ib(
+                    label,
+                    style="primary",
+                    callback_data=f"st:sumphoto_del:{idx}",
+                ),
+                ib(
+                    name,
+                    style="primary",
+                    callback_data=f"st:sumphoto_del:{idx}",
+                ),
+            ]
+        )
+
+    rows.append(
+        [ib("➕ افزودن کانال", callback_data="st:sumphoto_set")]
+    )
+    rows.append(
+        [ib("◀️ بازگشت", callback_data="st:panel")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
 def settings_panel_keyboard() -> InlineKeyboardMarkup:
     """صفحه اصلی پنل تنظیمات."""
     return InlineKeyboardMarkup(
@@ -193,6 +233,15 @@ def settings_panel_keyboard() -> InlineKeyboardMarkup:
                 ),
                 ib(
                     "🗄️ دیتابیس‌های سفارشی", callback_data="st:dbs"
+                ),
+            ],
+            [
+                # R33: کانال نگهداری عکس خلاصه‌ها
+                ib(
+                    # R34: چند کانال عکس خلاصه (رنگ سبز — درخواست کاربر)
+                    "🖼️ کانال‌های عکس خلاصه",
+                    callback_data="st:sumphoto",
+                    style="success",
                 ),
             ],
             [
@@ -281,29 +330,70 @@ def settings_channels_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def settings_duration_keyboard() -> InlineKeyboardMarkup:
+def settings_duration_keyboard(kind: str = "files") -> InlineKeyboardMarkup:
+    """R27: پیش‌فرض‌های زمان حذف برای هدف انتخاب‌شده (files/posts/panel)."""
     return InlineKeyboardMarkup(
         [
             [
                 # R23: همهٔ پیش‌فرض‌های زمان حذف آبی
-                ib("5 دقیقه", style="primary", callback_data="st:dur:300"),
-                ib("10 دقیقه", style="primary", callback_data="st:dur:600"),
-                ib("30 دقیقه", style="primary", callback_data="st:dur:1800"),
+                ib("5 دقیقه", style="primary",
+                   callback_data=f"st:dur:{kind}:300"),
+                ib("10 دقیقه", style="primary",
+                   callback_data=f"st:dur:{kind}:600"),
+                ib("30 دقیقه", style="primary",
+                   callback_data=f"st:dur:{kind}:1800"),
             ],
             [
-                ib("1 ساعت", style="primary", callback_data="st:dur:3600"),
-                ib("24 ساعت", style="primary", callback_data="st:dur:86400"),
+                ib("1 ساعت", style="primary",
+                   callback_data=f"st:dur:{kind}:3600"),
+                ib("24 ساعت", style="primary",
+                   callback_data=f"st:dur:{kind}:86400"),
             ],
             [
                 ib(
-                    "📝 مقدار دلخواه", callback_data="st:dur_custom"
+                    "📝 مقدار دلخواه", callback_data=f"st:dur_custom:{kind}"
+                )
+            ],
+            [
+                ib("🔙 بازگشت", callback_data="st:panel")
+            ],
+        ]
+    )
+
+
+def settings_duration_menu_keyboard() -> InlineKeyboardMarkup:
+    """R27: انتخاب هدفی که می‌خواهی زمان حذفش را تنظیم کنی."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                ib(
+                    "📁 فایل‌های آپلود",
+                    style="primary",
+                    callback_data="st:dur_menu:files",
                 )
             ],
             [
                 ib(
-                    "🔙 بازگشت", callback_data="st:panel"
+                    "📝 پست‌های کانال",
+                    style="primary",
+                    callback_data="st:dur_menu:posts",
                 )
             ],
+            [
+                ib(
+                    "🧧 خلاصه داستان",
+                    style="primary",
+                    callback_data="st:dur_menu:summary",
+                )
+            ],
+            [
+                ib(
+                    "📋 پنل لینک فصل",
+                    style="primary",
+                    callback_data="st:dur_menu:panel",
+                )
+            ],
+            [ib("🔙 بازگشت", callback_data="st:panel")],
         ]
     )
 
