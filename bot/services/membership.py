@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Union
 
@@ -18,6 +19,68 @@ from ..utils import (
 logger = logging.getLogger(__name__)
 
 
+MAX_MEMBER_ATTEMPTS = 3
+MEMBER_RETRY_DELAY = 1.5   # ثانیه — هم برای تلاش دوباره، هم بعد از خطا
+
+
+def _is_not_member_error(err: TelegramError) -> bool:
+    """R36: خطاهایی که یعنی «کاربر عضو نیست» (نه خطای شبکه/دسترسی)."""
+    text = str(err).lower()
+    return (
+        "user not found" in text
+        or "participant" in text
+        or "not a member" in text
+        or "kicked" in text
+        or "user_id_invalid" in text
+    )
+
+
+async def _check_channel(
+    user_id: int,
+    channel,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> bool:
+    """R36: بررسی عضویت یک کانال — با تلاش دوباره و تمایز خطاها.
+
+    قبلاً هر خطای گذرا (timeout/Too Many Requests) «عضو نیست» حساب
+    می‌شد و کاربری که عضو بود، پیام «عضو شوید» می‌دید.
+    """
+    for attempt in range(MAX_MEMBER_ATTEMPTS):
+        try:
+            member = await context.bot.get_chat_member(
+                chat_id=channel,
+                user_id=user_id,
+            )
+        except TelegramError as err:
+            if _is_not_member_error(err):
+                logger.info(
+                    "عضویت user=%s ch=%s: %s", user_id, channel, err
+                )
+                return False
+            logger.warning(
+                "Membership check retry user=%s ch=%s err=%s",
+                user_id,
+                channel,
+                err,
+            )
+            if attempt == MAX_MEMBER_ATTEMPTS - 1:
+                # خطای غیرقطعی ⇒ کاربر را بیرون نگه ندار (به نفع کاربر)
+                return True
+            await asyncio.sleep(MEMBER_RETRY_DELAY)
+            continue
+
+        if is_member_status(member):
+            return True
+
+        # Some channels report "restricted/left" right after joining;
+        # یک‌بار دیگر با فاصله چک می‌کنیم.
+        if attempt == MAX_MEMBER_ATTEMPTS - 1:
+            return False
+        await asyncio.sleep(MEMBER_RETRY_DELAY)
+
+    return False
+
+
 async def get_not_joined_channels(
     user_id: int,
     context: ContextTypes.DEFAULT_TYPE,
@@ -25,20 +88,7 @@ async def get_not_joined_channels(
     not_joined: List[Union[int, str]] = []
 
     for channel in config.REQUIRED_CHANNELS:
-        try:
-            member = await context.bot.get_chat_member(
-                chat_id=channel,
-                user_id=user_id,
-            )
-            if not is_member_status(member):
-                not_joined.append(channel)
-        except TelegramError as err:
-            logger.warning(
-                "Membership check failed user=%s ch=%s err=%s",
-                user_id,
-                channel,
-                err,
-            )
+        if not await _check_channel(user_id, channel, context):
             not_joined.append(channel)
 
     return not_joined
@@ -61,7 +111,12 @@ async def send_join_prompt(
         if join_url:
             keyboard.append(
                 [
-                    ib(f"عضویت در {channel_display_name(channel)}", url=join_url)
+                    # R36: کانال‌ها آبی، دکمه‌های تأیید سبز
+                    ib(
+                        f"عضویت در {channel_display_name(channel)}",
+                        url=join_url,
+                        style="primary",
+                    )
                 ]
             )
             continue
@@ -74,13 +129,21 @@ async def send_join_prompt(
             if getattr(chat, "username", None):
                 keyboard.append(
                     [
-                        ib(f"عضویت در {title}", url=f"https://t.me/{chat.username}")
+                        ib(
+                            f"عضویت در {title}",
+                            url=f"https://t.me/{chat.username}",
+                            style="primary",
+                        )
                     ]
                 )
             elif getattr(chat, "invite_link", None):
                 keyboard.append(
                     [
-                        ib(f"عضویت در {title}", url=chat.invite_link)
+                        ib(
+                            f"عضویت در {title}",
+                            url=chat.invite_link,
+                            style="primary",
+                        )
                     ]
                 )
             else:
@@ -88,7 +151,11 @@ async def send_join_prompt(
                     invite = await context.bot.create_chat_invite_link(channel)
                     keyboard.append(
                         [
-                            ib(f"عضویت در {title}", url=invite.invite_link)
+                            ib(
+                                f"عضویت در {title}",
+                                url=invite.invite_link,
+                                style="primary",
+                            )
                         ]
                     )
                 except TelegramError:
@@ -98,7 +165,11 @@ async def send_join_prompt(
 
     keyboard.append(
         [
-            ib("✅ عضو شدم، بررسی مجدد", callback_data=f"recheck:{session_id}")
+            ib(
+                "✅ عضو شدم، بررسی مجدد",
+                callback_data=f"recheck:{session_id}",
+                style="success",
+            )
         ]
     )
 

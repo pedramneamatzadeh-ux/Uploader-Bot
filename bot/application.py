@@ -70,12 +70,19 @@ from .constants import (
     SETTINGS_DURATION,
     SETTINGS_PANEL,
     SETTINGS_BUTTON,
+    WAIT_REPORT_DETAIL,
     WAIT_REPORT_TEXT,
 )
 from .keyboards import quality_pattern_string
 from .handlers.backup import handle_backup
 from .handlers.base import (
+    cancel_report_detail,
+    receive_report_detail,
+    report_more_cancel,
+    report_more_save,
     receive_report_text,
+    report_detail_prompt,
+    request_more_report_info,
     recheck_callback,
     report_cancel,
     report_skip,
@@ -164,7 +171,10 @@ from .handlers.settings import (
     receive_duration_input,
     settings_callback,
 )
-from .services.group_panel import handle_group_panel_callback
+from .services.group_panel import (
+    cancel_group_panel,
+    handle_group_panel_callback,
+)
 from .services.panels import (
     PANEL_BUTTONS_PATTERN,
     panel_gate,
@@ -656,6 +666,38 @@ def _build_settings_conversation() -> ConversationHandler:
     )
 
 
+def _build_report_detail_conversation() -> ConversationHandler:
+    """R35: «✍️ توضیح دقیق‌تر» — فقط برای کاربر گزارش‌دهنده.
+
+    جدا از مکالمهٔ گزارش خرابی است تا کلیک ادمین روی «🔎 دقیقاً مشکل
+    چیه؟» با آن قاطی نشود (handler گروه -1 هم به این دست نمی‌زند).
+    """
+    return ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(
+                report_detail_prompt, pattern=r"^report_more_write:\d+$"
+            )
+        ],
+        states={
+            WAIT_REPORT_DETAIL: [
+                CallbackQueryHandler(
+                    report_more_save, pattern=r"^report_more_save:\d+$"
+                ),
+                CallbackQueryHandler(
+                    report_more_cancel, pattern=r"^report_more_cancel:\d+$"
+                ),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    receive_report_detail,
+                ),
+            ],
+        },
+        fallbacks=[MessageHandler(filters.COMMAND, cancel_report_detail)],
+        conversation_timeout=300,
+        allow_reentry=True,
+    )
+
+
 def _build_report_conversation() -> ConversationHandler:
     """R8+: گزارش خرابی لینک — پس از زدن دکمه، توضیحات خواسته می‌شود.
 
@@ -717,23 +759,21 @@ def _build_group_panel_conversation() -> ConversationHandler:
     بدون fallback: `?start` بعدی به‌طور طبیعی مکالمه را جای‌گزین می‌کند و
     دکمه‌های بی‌صاحب به `stale_callback_answer` می‌رسند.
     """
+    panel_cb = CallbackQueryHandler(
+        handle_group_panel_callback, pattern=r"^gp_"
+    )
+    # R38: «❌ انصراف» و دکمهٔ «بستن» بدون نیاز به state هم کار می‌کنند
+    cancel_cb = CallbackQueryHandler(
+        cancel_group_panel, pattern=r"^gp_cancel"
+    )
+    close_cb = CallbackQueryHandler(
+        handle_group_panel_callback, pattern=r"^gp_close:"
+    )
     return ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(
-                handle_group_panel_callback, pattern=r"^gp_"
-            )
-        ],
+        entry_points=[panel_cb, cancel_cb, close_cb],
         states={
-            GROUP_PANEL_QUALITIES: [
-                CallbackQueryHandler(
-                    handle_group_panel_callback, pattern=r"^gp_"
-                )
-            ],
-            GROUP_PANEL_EPISODES: [
-                CallbackQueryHandler(
-                    handle_group_panel_callback, pattern=r"^gp_"
-                )
-            ],
+            GROUP_PANEL_QUALITIES: [panel_cb, cancel_cb, close_cb],
+            GROUP_PANEL_EPISODES: [panel_cb, cancel_cb, close_cb],
         },
         fallbacks=[],
         allow_reentry=True,
@@ -760,6 +800,19 @@ def build_application() -> Application:
     )
     report_conv = _build_report_conversation()
     application.add_handler(report_conv)
+
+    # R37: «🔎 دقیقاً مشکل چیه؟» (ادمین در آمار) **باید قبل از** مکالمهٔ
+    # گزارش‌دهنده ثبت شود؛ قبلاً برعکس بود و کلیک ادمین به مکالمهٔ
+    # «توضیح دقیق‌تر» می‌رسید و پیام «این دکمه برای گزارش‌دهنده…» می‌داد.
+    application.add_handler(
+        CallbackQueryHandler(
+            request_more_report_info, pattern=r"^report_more:\d+$"
+        ),
+        group=0,
+    )
+
+    # R37: مکالمهٔ گزارش‌دهنده (نوشتن / ثبت / انصراف)
+    application.add_handler(_build_report_detail_conversation())
 
     upload_conv = _build_upload_conversation()
     ongoing_conv = _build_ongoing_conversation(quality_pattern)

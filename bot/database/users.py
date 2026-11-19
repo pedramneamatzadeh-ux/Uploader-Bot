@@ -413,6 +413,34 @@ class UsersMixin:
                 "SELECT COUNT(*) FROM reports"
             ).fetchone()[0]
 
+    def add_report_detail(self, report_id: int, text: str) -> bool:
+        """R35: افزودن «توضیح دقیق‌تر» به همان گزارش (بدون رکورد جدید).
+
+        متن قبلی حفظ می‌شود و متن تازه با برچسب «توضیح تکمیلی» به آن
+        اضافه می‌گردد؛ حداکثر ۳۰۰۰ نویسه نگه داشته می‌شود.
+        """
+        report = self.get_report_by_id(report_id)
+        if not report:
+            return False
+
+        previous = (report.get("report_text") or "").strip()
+        extra = (text or "").strip()
+        if not extra:
+            return False
+
+        merged = (
+            f"{previous}\n\n➕ توضیح تکمیلی ({len(extra)} نویسه):\n{extra}"
+            if previous
+            else extra
+        )[:3000]
+
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE reports SET report_text = ? WHERE id = ?",
+                (merged, int(report_id)),
+            )
+        return cursor.rowcount > 0
+
     def update_report_status(
         self,
         report_id: int,

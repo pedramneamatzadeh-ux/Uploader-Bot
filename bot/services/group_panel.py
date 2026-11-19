@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -69,17 +70,45 @@ def _episode_label(episode: str) -> str:
     return f"قسمت {episode}" if episode else "قسمت نامشخص"
 
 
-def qualities_keyboard(group: Dict[str, Any], qualities: List[Dict[str, Any]]):
+def _code_part(text: str) -> str:
+    """R38/R39: کد کوتاهِ کیفیت/قسمت برای callback_data.
+
+    کیفیت/قسمت در `user_data` نگه داشته می‌شود (نه در دکمه) تا
+    callback_data از سقف ۶۴ بایت رد نشود؛ این هش فقط برای تطبیق دکمه
+    با فهرست فعلیِ کیفیت‌ها/قسمت‌هاست.
+    """
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+
+
+def _cancel_button():
+    """R39: دکمهٔ «❌ انصراف» پنل کاربر (قرمز)."""
+    return ib("❌ انصراف", style="danger", callback_data="gp_cancel")
+
+
+def _panel_state(context: ContextTypes.DEFAULT_TYPE) -> Dict[str, Any]:
+    """R38: وضعیت پنل کاربر — بی‌صاحب (فقط بر اساس شناسهٔ کاربر)."""
+    try:
+        state = context.user_data.get(PANEL_KEY)
+    except (AttributeError, TypeError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def qualities_keyboard(
+    group: Dict[str, Any],
+    qualities: List[Dict[str, Any]],
+):
     rows = []
     for item in qualities:
         quality = item.get("quality") or "نامشخص"
-        # R27: درخواست کاربر — تعداد «لینک» نوشته شود، نه «قسمت»
-        count = item.get("links") or 0
+        # R35: تعداد **فایل/قسمتِ** هر کیفیت (مجموع بازه‌های پیام‌ها)،
+        # نه تعداد لینک — درخواست کاربر
+        count = item.get("files") or item.get("episodes") or 0
         rows.append(
             [
                 ib(
-                    f"{quality} ({count} لینک)",
-                    callback_data=f"gp_q:{quality}",
+                    f"{quality} ({count} قسمت)",
+                    callback_data=f"gp_q:{_code_part(quality)}",
                     style="primary",
                 )
             ]
@@ -88,6 +117,8 @@ def qualities_keyboard(group: Dict[str, Any], qualities: List[Dict[str, Any]]):
     if not rows:
         return None
 
+    # R39: تنها راه بستن پنل — «❌ انصراف» (درخواست کاربر)
+    rows.append([_cancel_button()])
     return InlineKeyboardMarkup(rows)
 
 
@@ -107,7 +138,7 @@ def episodes_keyboard(
             [
                 ib(
                     label,
-                    callback_data=f"gp_e:{page}:{episode}",
+                    callback_data=f"gp_e:{_code_part(episode)}",
                     style="primary",
                 )
             ]
@@ -123,6 +154,8 @@ def episodes_keyboard(
 
     # R27: دکمهٔ «بروزرسانی» حذف شد (درخواست کاربر)
     rows.append([ib("◀️ بازگشت به کیفیت‌ها", callback_data="gp_back")])
+    # R39: تنها راه بستن پنل — «❌ انصراف»
+    rows.append([_cancel_button()])
     return InlineKeyboardMarkup(rows)
 
 
@@ -136,11 +169,23 @@ def render_qualities(group: Dict[str, Any]) -> Optional[tuple]:
         return None
 
     title = _group_title(group)
-    total_episodes = max(item.get("episodes") or 0 for item in qualities)
+    # R35: «تعداد قسمت» = تعداد فایل‌های هر کیفیت (نه تعداد لینک)؛
+    # اگر بین کیفیت‌ها فرق داشت، تفکیک هر کیفیت هم نوشته می‌شود.
+    counts = {
+        (item.get("quality") or "نامشخص"): (
+            item.get("files") or item.get("episodes") or 0
+        )
+        for item in qualities
+    }
+    max_count = max(counts.values()) if counts else 0
 
-    lines = [
-        f"🎬 {title}",
-        f"📊 {len(qualities)} کیفیت · {total_episodes} قسمت",
+    lines = [f"🎬 {title}", f"📊 {len(qualities)} کیفیت"]
+    if len(set(counts.values())) <= 1:
+        lines.append(f"📺 {max_count} قسمت")
+    else:
+        for quality, count in counts.items():
+            lines.append(f"  • {quality}: {count} قسمت")
+    lines += [
         "",
         "برای دریافت فایل‌ها یک کیفیت را انتخاب کن:",
     ]
@@ -196,7 +241,13 @@ async def _show(
     if edit and query:
         try:
             await query.edit_message_text(text, reply_markup=markup)
-            _schedule_panel_delete(update, context)
+            state = _panel_state(context)
+            if query.message is not None:
+                state["msg"] = (query.message.chat_id, query.message.message_id)
+                try:
+                    context.user_data[PANEL_KEY] = state
+                except (AttributeError, TypeError):
+                    pass
             return
         except TelegramError as err:
             logger.info("ویرایش پنل گروه ممکن نشد: %s", err)
@@ -205,7 +256,13 @@ async def _show(
     if message:
         sent = await message.reply_text(text, reply_markup=markup)
         if sent is not None:
-            _schedule_panel_delete(update, context, sent.message_id)
+            # R39: پیام پنل بدون تایمر می‌ماند و فقط با «انصراف» بسته می‌شود
+            state = _panel_state(context)
+            state["msg"] = (message.chat_id, sent.message_id)
+            try:
+                context.user_data[PANEL_KEY] = state
+            except (AttributeError, TypeError):
+                pass
 
 
 def _schedule_panel_delete(update, context, message_id=None, chat_id=None):
@@ -291,44 +348,143 @@ async def deliver_group_panel(
         return True
 
     text, markup = payload
-    context.user_data[PANEL_KEY] = {"code": share_code}
+    context.user_data[PANEL_KEY] = {
+        "code": share_code,
+        "quality": None,
+        "page": 0,
+        "msg": None,
+    }
     panel_msg = await message.reply_text(text, reply_markup=markup)
-    # R29: خودِ پنل (صفحهٔ کیفیت‌ها/قسمت‌ها) هم با تایمر «panel» پاک می‌شود
+    # R38/R39: پیام پنل **تایمر حذف ندارد** — تا زدن «❌ انصراف» می‌ماند.
+    # تایمر «panel» فقط برای پیام‌های موقتِ ارسال فایل‌هاست.
     if panel_msg is not None:
-        _schedule_panel_delete(
-            None, context, panel_msg.message_id, chat_id=message.chat_id
-        )
+        state = context.user_data.get(PANEL_KEY) or {}
+        state["msg"] = (message.chat_id, panel_msg.message_id)
+        context.user_data[PANEL_KEY] = state
     return True
 
 
 # ---------------------------------------------------------------------------
 # هندلر callback پنل
 # ---------------------------------------------------------------------------
+def _quality_rows(group: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """R38: کیفیت‌های همین گروه (برای تطبیق کد دکمه با فهرست فعلی)."""
+    try:
+        rows = db.get_group_qualities(group)
+    except Exception:          # noqa: BLE001 — پنل نباید به‌خاطر خطای DB بشکند
+        logger.exception("خواندن کیفیت‌های پنل ناموفق بود")
+        return []
+    return rows or []
+
+
+def _match_quality(group: Dict[str, Any], code: str) -> Optional[str]:
+    """R38: کد دکمه ⇒ نام کیفیت (اگر دیگر وجود نداشته باشد None)."""
+    for item in _quality_rows(group):
+        quality = item.get("quality") or "نامشخص"
+        if _code_part(quality) == code:
+            return item.get("quality") or "نامشخص"
+    return None
+
+
+def _match_episode(
+    group: Dict[str, Any], quality: str, code: str
+) -> Optional[str]:
+    """R38: کد دکمه ⇒ بازهٔ قسمت (اگر دیگر وجود نداشته باشد None)."""
+    for item in db.get_group_episodes(group, quality) or []:
+        episode = item.get("episode_range") or ""
+        if _code_part(episode) == code:
+            return episode
+    return None
+
+
+async def close_user_panel(
+    context: ContextTypes.DEFAULT_TYPE,
+    answer_text: str = Msg.GROUP_PANEL_CLOSED,
+) -> Dict[str, Any]:
+    """R38/R39: بستن واقعی پنل کاربر — پیام پنل بی‌دکمه می‌شود.
+
+    state کاربر پاک می‌شود تا دکمه‌های قدیمی دیگر کاری نکنند. تنها راه
+    بستن این پنل: «❌ انصراف» یا منوی اصلی (/start).
+    """
+    state = _panel_state(context)
+    msg = state.get("msg")
+    if msg and msg[0] and msg[1]:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=msg[0],
+                message_id=msg[1],
+                text=answer_text,
+                reply_markup=None,
+            )
+        except TelegramError as err:
+            logger.info("ویرایش پیام پنل برای بستن ممکن نشد: %s", err)
+
+    try:
+        context.user_data.pop(PANEL_KEY, None)
+    except (AttributeError, TypeError):
+        pass
+    return state
+
+
+async def cancel_group_panel(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> Optional[int]:
+    """R38/R39: دکمهٔ «❌ انصراف» — پنل کاربر بسته می‌شود."""
+    query = update.callback_query
+    if not query:
+        return None
+
+    await query.answer(Msg.GROUP_PANEL_CLOSED_SHORT)
+    await close_user_panel(context)
+    return None
+
+
 async def handle_group_panel_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> Optional[int]:
+    """R39: دکمه‌های پنل کاربر (کیفیت‌ها ⇄ قسمت‌ها).
+
+    کیفیت/قسمت در state همین پنل نگه داشته می‌شود؛ فقط «❌ انصراف» پنل
+    را می‌بندد. بقیهٔ پنل‌های ربات مثل قبل با باز شدن پنل بعدی بسته
+    می‌شوند (این پنل در `register_panels` نیست).
+    """
     query = update.callback_query
     if not query or not query.data:
         return None
 
     data = query.data
-    state = context.user_data.get(PANEL_KEY) or {}
+    state = _panel_state(context)
     share_code = state.get("code")
-
     group = db.get_group_link(share_code) if share_code else None
+
+    # --- انصراف ---
+    if data.startswith("gp_cancel"):
+        return await cancel_group_panel(update, context)
+
+    # --- دکمه‌های بی‌صاحبِ پنلِ بسته‌شده ---
+    if data.startswith("gp_close"):
+        await query.answer(Msg.GROUP_PANEL_CLOSED_SHORT)
+        return None
+
     if not group:
         await query.answer(Msg.PANEL_CLOSED, show_alert=True)
-        context.user_data.pop(PANEL_KEY, None)
         return None
 
     if (group.get("status") or "active") != "active":
         await query.answer(Msg.GROUP_LINK_INACTIVE, show_alert=True)
         return None
 
+    parts = data.split(":")
+
     # --- انتخاب کیفیت ⇒ صفحهٔ قسمت‌ها ---
     if data.startswith("gp_q:"):
-        quality = data.split(":", 1)[1]
+        code = parts[1] if len(parts) > 1 else ""
+        quality = _match_quality(group, code)
+        if not quality:
+            await query.answer(Msg.GROUP_LINK_EMPTY, show_alert=True)
+            return None
         state["quality"] = quality
         state["page"] = 0
         context.user_data[PANEL_KEY] = state
@@ -356,13 +512,15 @@ async def handle_group_panel_callback(
 
     # --- صفحه‌بندی قسمت‌ها ---
     if data.startswith("gp_p:"):
-        try:
-            page = int(data.split(":", 1)[1])
-        except ValueError:
-            page = 0
+        page = 0
+        if len(parts) > 1:
+            try:
+                page = int(parts[1])
+            except ValueError:
+                page = 0
         quality = state.get("quality")
         if not quality:
-            await query.answer(Msg.PANEL_CLOSED, show_alert=True)
+            await query.answer(Msg.GROUP_PANEL_CLOSED, show_alert=True)
             return None
         payload = render_episodes(group, quality, page)
         if not payload:
@@ -375,7 +533,7 @@ async def handle_group_panel_callback(
         return None
 
     # --- بازگشت به کیفیت‌ها ---
-    if data == "gp_back":
+    if data.startswith("gp_back"):
         payload = render_qualities(group)
         if not payload:
             await query.answer(Msg.GROUP_LINK_EMPTY, show_alert=True)
@@ -388,10 +546,14 @@ async def handle_group_panel_callback(
 
     # --- ارسال فایل‌های یک قسمت ---
     if data.startswith("gp_e:"):
-        _, _, episode = data.split(":", 2)
+        code = parts[1] if len(parts) > 1 else ""
         quality = state.get("quality")
         if not quality:
-            await query.answer(Msg.PANEL_CLOSED, show_alert=True)
+            await query.answer(Msg.GROUP_PANEL_CLOSED, show_alert=True)
+            return None
+        episode = _match_episode(group, quality, code)
+        if episode is None:
+            await query.answer(Msg.GROUP_LINK_EMPTY, show_alert=True)
             return None
         await query.answer()
         await send_episode_files(update, context, group, quality, episode)

@@ -424,6 +424,18 @@ async def show_reports_stats(
             )
         )
         keyboard.append(row)
+        # R35: «دقیقاً مشکل چیه؟» — به گزارش‌دهنده پیام می‌فرستد تا
+        # توضیح دقیق‌تر بدهد (فقط برای گزارش‌های در انتظار)
+        if report["status"] == "pending":
+            keyboard.append(
+                [
+                    ib(
+                        f"🔎 دقیقاً مشکل چیه؟ #{report['id']}",
+                        style="success",
+                        callback_data=f"report_more:{report['id']}",
+                    )
+                ]
+            )
 
     # R23b: کلید فیلتر درست بالای ردیف قبلی/بعدی/تازه‌سازی و سبز
     if only_pending:
@@ -469,13 +481,13 @@ async def show_report_detail(
     message_id: int = None,
 ) -> None:
     """R8c: صفحه جزئیات یک گزارش — اطلاعات کامل فایل + توضیحات کاربر."""
-    back = InlineKeyboardMarkup(
+    # R35: در جزئیات هم دکمهٔ «دقیقاً مشکل چیه؟» هست
+    back_rows = [
         [
-            [
-                ib("🔙 بازگشت به گزارش‌ها", callback_data=f"stats_reports_go:{page}:{f}")
-            ]
+            ib("🔙 بازگشت به گزارش‌ها", callback_data=f"stats_reports_go:{page}:{f}")
         ]
-    )
+    ]
+    back = InlineKeyboardMarkup(back_rows)
 
     report = db.get_report_by_id(report_id)
     if not report:
@@ -505,6 +517,28 @@ async def show_report_detail(
         if report["status"] == "pending"
         else "✅ حل‌شده"
     )
+    if report["status"] == "pending":
+        back_rows.insert(
+            0,
+            [
+                ib(
+                    "🔎 دقیقاً مشکل چیه؟",
+                    style="success",
+                    callback_data=f"report_more:{report_id}",
+                )
+            ],
+        )
+        # R37: ادمین می‌تواند گزارش را دستی هم ببندد
+        back_rows.insert(
+            1,
+            [
+                ib(
+                    "🎫 ثبت گزارش تازه برای همین فایل",
+                    style="primary",
+                    callback_data=f"report_reopen:{report_id}",
+                )
+            ],
+        )
     channel = report.get("channel_chat_id") or "کانال پیش‌فرض"
 
     # بدون parse_mode: متن آزاد کاربر خام نمایش داده می‌شود (ایمن).
@@ -534,6 +568,45 @@ async def show_report_detail(
         text,
         back,
         message_id,
+    )
+
+
+async def _reopen_report(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    message_id: int,
+    data: str,
+) -> None:
+    """R37: «🎫 ثبت گزارش تازه برای همین فایل» توسط ادمین.
+
+    گزارش فعلی بسته و یک گزارش تازه با همان فایل باز می‌شود (بدون
+    توضیح) تا کاربر بتواند دوباره گزارش بدهد.
+    """
+    try:
+        report_id = int(data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        await query.answer(Msg.REPORT_NOT_FOUND, show_alert=True)
+        return
+
+    report = db.get_report_by_id(report_id)
+    if not report:
+        await query.answer(Msg.REPORT_NOT_FOUND, show_alert=True)
+        return
+
+    db.update_report_status(report_id, "resolved")
+    try:
+        new_id = db.save_report(
+            report["session_id"], report["user_id"], None
+        )
+    except Exception:      # noqa: BLE001 — نباید پنل را بشکند
+        logger.exception("ثبت گزارش تازه ناموفق (base=%s)", report_id)
+        await query.answer(Msg.SAVE_ERROR, show_alert=True)
+        return
+
+    await query.answer(f"🎫 گزارش #{report_id} بسته شد؛ #{new_id} باز شد.")
+    await show_report_detail(
+        chat_id, context, new_id, 0, "a", message_id
     )
 
 
@@ -1079,5 +1152,7 @@ async def handle_stats_callback(
         )
     elif data.startswith("resolve_report:"):
         await _resolve_report(query, context, chat_id, message_id, data)
+    elif data.startswith("report_reopen:"):
+        await _reopen_report(query, context, chat_id, message_id, data)
 
     return MANAGE_STATS

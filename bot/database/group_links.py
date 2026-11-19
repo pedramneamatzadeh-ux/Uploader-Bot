@@ -18,6 +18,19 @@ _ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"
 _CODE_LEN = 8
 
 
+def _count_ranges(joined) -> int:
+    """R35: مجموع تعداد آیدی‌های پیام در فهرست بازه‌ها («1-12|13-24»).
+
+    هر آیدی = یک فایل. ورودی `GROUP_CONCAT` است با جداکنندهٔ «|».
+    """
+    from ..utils import parse_id_list
+
+    total = 0
+    for part in str(joined or "").split("|"):
+        total += len(parse_id_list(part.strip()) or [])
+    return total
+
+
 class GroupLinkMixin:
 
     # ------------------------------------------------------------------
@@ -404,7 +417,10 @@ class GroupLinkMixin:
                         CASE WHEN COALESCE(status, 'active') = 'active'
                              THEN 1 ELSE 0 END
                     ) AS active_links,
-                    COUNT(*) AS links
+                    COUNT(*) AS links,
+                    GROUP_CONCAT(
+                        COALESCE(channel_msg_range, ''), '|'
+                    ) AS ranges
                 FROM uploads
                 WHERE anime_name = ?
                   AND COALESCE(season_num, '') = COALESCE(?, '')
@@ -418,10 +434,18 @@ class GroupLinkMixin:
                 ),
             ).fetchall()
 
-        result = [
-            dict(row) for row in rows
-            if row["active_links"]  # کیفیت بدون لینک فعال نمایش داده نشود
-        ]
+        result = []
+        for row in rows:
+            if not row["active_links"]:
+                # کیفیت بدون لینک فعال نمایش داده نشود
+                continue
+            item = dict(row)
+            # R35: تعداد **فایل**های هر کیفیت (مجموع بازه‌های پیام‌ها)،
+            # نه تعداد لینک؛ برای شمارش «چند قسمت» در پنل کاربر.
+            item["files"] = _count_ranges(item.pop("ranges", ""))
+            if not item["files"]:
+                item["files"] = item.get("episodes") or 0
+            result.append(item)
         from ..constants import ALL_QUALITIES
 
         order = {q: idx for idx, q in enumerate(ALL_QUALITIES)}
