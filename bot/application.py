@@ -171,10 +171,7 @@ from .handlers.settings import (
     receive_duration_input,
     settings_callback,
 )
-from .services.group_panel import (
-    cancel_group_panel,
-    handle_group_panel_callback,
-)
+from .services.group_panel import handle_group_panel_callback
 from .services.panels import (
     PANEL_BUTTONS_PATTERN,
     panel_gate,
@@ -762,18 +759,11 @@ def _build_group_panel_conversation() -> ConversationHandler:
     panel_cb = CallbackQueryHandler(
         handle_group_panel_callback, pattern=r"^gp_"
     )
-    # R38: «❌ انصراف» و دکمهٔ «بستن» بدون نیاز به state هم کار می‌کنند
-    cancel_cb = CallbackQueryHandler(
-        cancel_group_panel, pattern=r"^gp_cancel"
-    )
-    close_cb = CallbackQueryHandler(
-        handle_group_panel_callback, pattern=r"^gp_close:"
-    )
     return ConversationHandler(
-        entry_points=[panel_cb, cancel_cb, close_cb],
+        entry_points=[panel_cb],
         states={
-            GROUP_PANEL_QUALITIES: [panel_cb, cancel_cb, close_cb],
-            GROUP_PANEL_EPISODES: [panel_cb, cancel_cb, close_cb],
+            GROUP_PANEL_QUALITIES: [panel_cb],
+            GROUP_PANEL_EPISODES: [panel_cb],
         },
         fallbacks=[],
         allow_reentry=True,

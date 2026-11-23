@@ -80,11 +80,6 @@ def _code_part(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
 
 
-def _cancel_button():
-    """R39: دکمهٔ «❌ انصراف» پنل کاربر (قرمز)."""
-    return ib("❌ انصراف", style="danger", callback_data="gp_cancel")
-
-
 def _panel_state(context: ContextTypes.DEFAULT_TYPE) -> Dict[str, Any]:
     """R38: وضعیت پنل کاربر — بی‌صاحب (فقط بر اساس شناسهٔ کاربر)."""
     try:
@@ -117,8 +112,6 @@ def qualities_keyboard(
     if not rows:
         return None
 
-    # R39: تنها راه بستن پنل — «❌ انصراف» (درخواست کاربر)
-    rows.append([_cancel_button()])
     return InlineKeyboardMarkup(rows)
 
 
@@ -154,8 +147,6 @@ def episodes_keyboard(
 
     # R27: دکمهٔ «بروزرسانی» حذف شد (درخواست کاربر)
     rows.append([ib("◀️ بازگشت به کیفیت‌ها", callback_data="gp_back")])
-    # R39: تنها راه بستن پنل — «❌ انصراف»
-    rows.append([_cancel_button()])
     return InlineKeyboardMarkup(rows)
 
 
@@ -248,6 +239,8 @@ async def _show(
                     context.user_data[PANEL_KEY] = state
                 except (AttributeError, TypeError):
                     pass
+            # R42: صفحهٔ پنل هم تایمر حذف دارد (زمان پنل — همان ۲۰ ثانیه)
+            _schedule_panel_delete(update, context)
             return
         except TelegramError as err:
             logger.info("ویرایش پنل گروه ممکن نشد: %s", err)
@@ -256,13 +249,14 @@ async def _show(
     if message:
         sent = await message.reply_text(text, reply_markup=markup)
         if sent is not None:
-            # R39: پیام پنل بدون تایمر می‌ماند و فقط با «انصراف» بسته می‌شود
             state = _panel_state(context)
             state["msg"] = (message.chat_id, sent.message_id)
             try:
                 context.user_data[PANEL_KEY] = state
             except (AttributeError, TypeError):
                 pass
+            # R42: پیام تازهٔ پنل هم با تایمر «panel» حذف می‌شود
+            _schedule_panel_delete(update, context, sent.message_id)
 
 
 def _schedule_panel_delete(update, context, message_id=None, chat_id=None):
@@ -348,6 +342,9 @@ async def deliver_group_panel(
         return True
 
     text, markup = payload
+    # R42: خودِ پیام پنل (کیفیت‌ها/قسمت‌ها) با تایمر «پنل» حذف می‌شود
+    # (زمان پنل؛ اگر تنظیم نشده باشد از زمان فایل‌ها ارث می‌برد).
+    # R43: هیچ خط اطلاع‌رسانی زیر متن پنل نمی‌آید (درخواست کاربر).
     context.user_data[PANEL_KEY] = {
         "code": share_code,
         "quality": None,
@@ -355,12 +352,14 @@ async def deliver_group_panel(
         "msg": None,
     }
     panel_msg = await message.reply_text(text, reply_markup=markup)
-    # R38/R39: پیام پنل **تایمر حذف ندارد** — تا زدن «❌ انصراف» می‌ماند.
-    # تایمر «panel» فقط برای پیام‌های موقتِ ارسال فایل‌هاست.
     if panel_msg is not None:
         state = context.user_data.get(PANEL_KEY) or {}
         state["msg"] = (message.chat_id, panel_msg.message_id)
         context.user_data[PANEL_KEY] = state
+        # R42: تایمر «panel» برای همین پیام — دقیقاً مثل قبل (R29)
+        _schedule_panel_delete(
+            None, context, panel_msg.message_id, chat_id=message.chat_id
+        )
     return True
 
 
@@ -397,58 +396,15 @@ def _match_episode(
     return None
 
 
-async def close_user_panel(
-    context: ContextTypes.DEFAULT_TYPE,
-    answer_text: str = Msg.GROUP_PANEL_CLOSED,
-) -> Dict[str, Any]:
-    """R38/R39: بستن واقعی پنل کاربر — پیام پنل بی‌دکمه می‌شود.
-
-    state کاربر پاک می‌شود تا دکمه‌های قدیمی دیگر کاری نکنند. تنها راه
-    بستن این پنل: «❌ انصراف» یا منوی اصلی (/start).
-    """
-    state = _panel_state(context)
-    msg = state.get("msg")
-    if msg and msg[0] and msg[1]:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=msg[0],
-                message_id=msg[1],
-                text=answer_text,
-                reply_markup=None,
-            )
-        except TelegramError as err:
-            logger.info("ویرایش پیام پنل برای بستن ممکن نشد: %s", err)
-
-    try:
-        context.user_data.pop(PANEL_KEY, None)
-    except (AttributeError, TypeError):
-        pass
-    return state
-
-
-async def cancel_group_panel(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-) -> Optional[int]:
-    """R38/R39: دکمهٔ «❌ انصراف» — پنل کاربر بسته می‌شود."""
-    query = update.callback_query
-    if not query:
-        return None
-
-    await query.answer(Msg.GROUP_PANEL_CLOSED_SHORT)
-    await close_user_panel(context)
-    return None
-
-
 async def handle_group_panel_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> Optional[int]:
     """R39: دکمه‌های پنل کاربر (کیفیت‌ها ⇄ قسمت‌ها).
 
-    کیفیت/قسمت در state همین پنل نگه داشته می‌شود؛ فقط «❌ انصراف» پنل
-    را می‌بندد. بقیهٔ پنل‌های ربات مثل قبل با باز شدن پنل بعدی بسته
-    می‌شوند (این پنل در `register_panels` نیست).
+    کیفیت/قسمت در state همین پنل نگه داشته می‌شود. پیام پنل با تایمر
+    «پنل» حذف می‌شود (R42) و بقیهٔ پنل‌های ربات مثل قبل با باز شدن پنل
+    بعدی بسته می‌شوند (این پنل در `register_panels` نیست).
     """
     query = update.callback_query
     if not query or not query.data:
@@ -459,13 +415,9 @@ async def handle_group_panel_callback(
     share_code = state.get("code")
     group = db.get_group_link(share_code) if share_code else None
 
-    # --- انصراف ---
-    if data.startswith("gp_cancel"):
-        return await cancel_group_panel(update, context)
-
-    # --- دکمه‌های بی‌صاحبِ پنلِ بسته‌شده ---
-    if data.startswith("gp_close"):
-        await query.answer(Msg.GROUP_PANEL_CLOSED_SHORT)
+    # --- دکمه‌های پنلِ منقضی/بسته‌شده ---
+    if data.startswith(("gp_cancel", "gp_close")):
+        await query.answer(Msg.GROUP_PANEL_CLOSED, show_alert=True)
         return None
 
     if not group:

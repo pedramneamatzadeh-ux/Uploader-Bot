@@ -16,7 +16,7 @@ from ..services.delivery import (
     deliver_post_for_session,
     deliver_summary_for_session,
 )
-from ..services.group_panel import close_user_panel, deliver_group_panel
+from ..services.group_panel import deliver_group_panel
 from ..services.panels import close_panels_for
 from ..utils import build_download_link, fmt_tehran, track_user
 
@@ -37,8 +37,8 @@ async def start(
     # P16 — /start همیشه منوی تمیز می‌دهد: همه‌ی پنل‌های باز بسته می‌شوند.
     if update.effective_chat:
         close_panels_for(context, update.effective_chat.id, user.id)
-    # R38: پنل لینک فصل فقط با «❌ انصراف» (یا همین /start) بسته می‌شود
-    await close_user_panel(context, answer_text=Msg.GROUP_PANEL_CLOSED)
+    # R42: /start با لینک تازه، state پنل قبلی را پاک می‌کند
+    context.user_data.pop("group_panel", None)
 
     track_user(update)
 
